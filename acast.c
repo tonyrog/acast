@@ -20,7 +20,7 @@ void print_acast(FILE* f, acast_t* acast)
     fprintf(f, "bytes_per_channel: %u\n", acast->param.bytes_per_channel);
     fprintf(f, "sample_rate: %u\n", acast->param.sample_rate);
 
-    fprintf(f, "[frame delay = %.2fms]\n",
+    fprintf(f, "[frame_time = %.2fms]\n",
 	    1000*(1.0/acast->param.sample_rate)*acast->num_frames);
     // print first frame only (debugging)
     fp = (int16_t*) acast->data;

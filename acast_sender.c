@@ -17,8 +17,8 @@
 #include "acast.h"
 
 int setup_multicast(char* maddr, char* ifaddr, int mport,
-		    int ttl, int loop,
-		    struct sockaddr_in* addr, int* addrlen)
+			int ttl, int loop,
+			struct sockaddr_in* addr, int* addrlen)
 {
     int s;
     if ((s = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
@@ -127,16 +127,17 @@ int main(int argc, char** argv)
     
     while(1) {
 	int r;
+	size_t nbytes;
+	
 	r = snd_pcm_readi(handle, acast->data, frames_per_packet);
+	nbytes = r * bytes_per_channel * channels_per_frame;
+	
 	acast->seqno = seqno++;
 	acast->num_frames = r;
-	if (acast->seqno % 100 == 0) {
-	    size_t size = r * bytes_per_channel * channels_per_frame;
+	if (acast->seqno % 100 == 0)
 	    print_acast(stderr, acast);
-	    // testing slowly
-	    sendto(s, acast_buffer, sizeof(acast_t)+size, 0,
-		   (struct sockaddr *) &addr, addrlen);
-	}
+	sendto(s, acast_buffer, sizeof(acast_t)+nbytes, 0,
+	       (struct sockaddr *) &addr, addrlen);
     }
     exit(0);
 

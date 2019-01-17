@@ -17,7 +17,7 @@
 #include "acast.h"
 
 #define SOFT_RESAMPLE 1
-#define LATENCY       0
+#define LATENCY       1000
 
 int setup_multicast(char* maddr, char* ifaddr, int mport,
 		    struct sockaddr_in* addr, int* addrlen)
@@ -83,6 +83,8 @@ int main(int argc, char** argv)
     acast_t* silence;
     uint32_t last_seqno = 0;
     acast_params_t bparam;
+    uint32_t drop = 0;
+    uint32_t seen_packet = 1;
     
     if (argc > 1)
 	name = argv[1];
@@ -162,7 +164,6 @@ int main(int argc, char** argv)
 	else {
 	    r = recvfrom(s, acast_buffer, sizeof(acast_buffer), 0, 
 			 (struct sockaddr *) &addr, &addrlen);
-	    printf("got %d bytes\n", r);
 	    if (r < 0) {
 		perror("recvfrom");
 		exit(1);
@@ -172,6 +173,8 @@ int main(int argc, char** argv)
 
 	    if (memcmp(&acast->param, &bparam, sizeof(acast_params_t)) != 0) {
 		fprintf(stderr, "new parameters\n");
+		print_acast(stderr, acast);
+	    
 		bparam = acast->param;
 		snd_pcm_set_params(handle,
 				   bparam.format,
@@ -188,9 +191,9 @@ int main(int argc, char** argv)
 	    }
 	    snd_pcm_writei(handle, acast->data,
 			   (snd_pcm_uframes_t)acast->num_frames);
-	    if (acast->seqno % 100 == 0) {
-		print_acast(stderr, acast);
-	    }
+	    if (seen_packet && ((drop=(acast->seqno - last_seqno)) != 1))
+		fprintf(stderr, "dropped %d frames\n", drop);
+	    seen_packet = 1;
 	    last_seqno = acast->seqno;
 	}
     }
