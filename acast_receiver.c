@@ -56,16 +56,89 @@ int setup_multicast(char* maddr, char* ifaddr, int mport,
     return s;
 }
 
+
 #define S_ERR(name) do { snd_function_name = #name; goto snd_error; } while(0)
 
+int pick_channels_8(uint8_t* src,
+		    unsigned int src_channels_per_frame,
+		    uint8_t* dst,		     
+		    unsigned int dst_channels_per_frame,
+		    uint8_t* channel_map,
+		    uint32_t frames)
+{
+    while(frames--) {
+	int i;
+	for (i = 0;  i < dst_channels_per_frame; i++)
+	    *dst++ = src[channel_map[i]];
+	src += src_channels_per_frame;
+    }
+}
+
+int pick_channels_16(uint16_t* src,
+		     unsigned int src_channels_per_frame,
+		     uint16_t* dst,		     
+		     unsigned int dst_channels_per_frame,
+		     uint8_t* channel_map,
+		     uint32_t frames)
+{
+    while(frames--) {
+	int i;
+	for (i = 0;  i < dst_channels_per_frame; i++)
+	    *dst++ = src[channel_map[i]];
+	src += src_channels_per_frame;
+    }
+}
+
+int pick_channels_32(uint32_t* src,
+		     unsigned int src_channels_per_frame,
+		     uint32_t* dst,		     
+		     unsigned int dst_channels_per_frame,
+		     uint8_t* channel_map,
+		     uint32_t frames)
+{
+    while(frames--) {
+	int i;
+	for (i = 0;  i < dst_channels_per_frame; i++)
+	    *dst++ = src[channel_map[i]];
+	src += src_channels_per_frame;
+    }
+}
+
+// select channels by channel masl from src and put into dst
+int pick_channels(snd_pcm_format_t fmt,
+		  unsigned int src_channels_per_frame,
+		  uint8_t* src,
+		  unsigned int dst_channels_per_frame,		  
+		  uint8_t* dst,
+		  uint8_t* channel_map,
+		  uint32_t frames)
+{
+    switch(snd_pcm_format_physical_width(fmt)) {
+    case 8:
+	pick_channels_8(src, src_channels_per_frame,
+			dst, dst_channels_per_frame,
+			channel_map, frames);
+	break;
+    case 16:
+	pick_channels_16((uint16_t*)src, src_channels_per_frame,
+			 (uint16_t*)dst, dst_channels_per_frame,
+			 channel_map, frames);
+	break;	
+    case 32:
+	pick_channels_32((uint32_t*)src, src_channels_per_frame,
+			 (uint32_t*)dst, dst_channels_per_frame,
+			 channel_map, frames);
+	break;
+    }
+}
+		  
 
 int main(int argc, char** argv)
 {
-    char* name = "default";    
+    char* name = "default";
     snd_pcm_t *handle;
     snd_pcm_hw_params_t *params;
     snd_pcm_format_t fmt = SND_PCM_FORMAT_S16_LE;
-    unsigned channels_per_frame = 6;
     uint32_t bits_per_channel;
     uint32_t bytes_per_channel;
     uint32_t sample_rate = 22000;
@@ -85,10 +158,12 @@ int main(int argc, char** argv)
     acast_params_t bparam;
     uint32_t drop = 0;
     uint32_t seen_packet = 0;
+    unsigned channels_per_frame = 1;
+    uint8_t  channel_map[1] = {1};
     
     if (argc > 1)
 	name = argv[1];
-    if ((s_error=snd_pcm_open(&handle, name, SND_PCM_STREAM_PLAYBACK, 0)) < 0)
+    if ((s_error=snd_pcm_open(&handle, name,SND_PCM_STREAM_PLAYBACK,0)) < 0)
 	S_ERR(snd_pcm_open);
 
     snd_pcm_hw_params_alloca(&params);
@@ -135,6 +210,7 @@ int main(int argc, char** argv)
     bparam.bits_per_channel   = bits_per_channel;
     bparam.bytes_per_channel  = bytes_per_channel;
     bparam.sample_rate        = sample_rate;
+    print_params(stderr, &bparam);
 
     if ((s=setup_multicast(MULTICAST_ADDR, MULTICAST_IF, MULTICAST_PORT,
 			   &addr, &addrlen)) < 0) {
@@ -147,7 +223,8 @@ int main(int argc, char** argv)
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = frames_per_packet;
     snd_pcm_format_set_silence(bparam.format, silence->data,
-			       silence->num_frames);
+			       frames_per_packet*channels_per_frame);
+
     
     while(1) {
 	int r;
@@ -179,16 +256,26 @@ int main(int argc, char** argv)
 		snd_pcm_set_params(handle,
 				   bparam.format,
 				   SND_PCM_ACCESS_RW_INTERLEAVED,
-				   bparam.channels_per_frame,
+				   channels_per_frame,
 				   bparam.sample_rate,
 				   SOFT_RESAMPLE,
 				   LATENCY);
 		frames_per_packet = (BYTES_PER_PACKET - sizeof(acast_t)) /
-		    (bparam.channels_per_frame * bparam.bytes_per_channel);
+		    (channels_per_frame * bparam.bytes_per_channel);
 		silence->num_frames = frames_per_packet;
-		snd_pcm_format_set_silence(bparam.format, silence->data,
-					   silence->num_frames);
+		snd_pcm_format_set_silence(bparam.format,silence->data,
+					   frames_per_packet*
+					   channels_per_frame);
 	    }
+	    // rearrange data by select channels wanted
+	    pick_channels(bparam.format,
+			  acast->param.channels_per_frame,
+			  acast->data,
+			  channels_per_frame,
+			  acast->data,
+			  channel_map,
+			  acast->num_frames);
+	    
 	    snd_pcm_writei(handle, acast->data,
 			   (snd_pcm_uframes_t)acast->num_frames);
 	    if (seen_packet && ((drop=(acast->seqno - last_seqno)) != 1))
