@@ -84,7 +84,7 @@ int main(int argc, char** argv)
     uint32_t last_seqno = 0;
     acast_params_t bparam;
     uint32_t drop = 0;
-    uint32_t seen_packet = 1;
+    uint32_t seen_packet = 0;
     
     if (argc > 1)
 	name = argv[1];
@@ -192,7 +192,7 @@ int main(int argc, char** argv)
 	    snd_pcm_writei(handle, acast->data,
 			   (snd_pcm_uframes_t)acast->num_frames);
 	    if (seen_packet && ((drop=(acast->seqno - last_seqno)) != 1))
-		fprintf(stderr, "dropped %d frames\n", drop);
+		fprintf(stderr, "dropped %u frames\n", drop);
 	    seen_packet = 1;
 	    last_seqno = acast->seqno;
 	}
