@@ -33,7 +33,7 @@ typedef struct _acast_t
     uint8_t  data[0];        // audio data
 } acast_t;
 
-
+extern void print_params(FILE* f, acast_params_t* params);
 extern void print_acast(FILE* f, acast_t* acast);
 
 #endif
