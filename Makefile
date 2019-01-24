@@ -1,11 +1,8 @@
 CFLAGS = -Og
 LDFLAGS = -g
 
-<<<<<<< HEAD
-all: acast_sender acast_receiver mp3_sender
-=======
-all: acast_sender acast_receiver acast_info
->>>>>>> 5665d0cd4d33c85e102b42fc2d52ce8cb75f39a3
+
+all: acast_sender acast_receiver mp3_sender acast_info
 
 acast_sender:	acast_sender.o  acast.o
 	$(CC) -o$@ $(LDFLAGS) acast_sender.o acast.o -lasound
