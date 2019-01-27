@@ -1,12 +1,79 @@
 // utils
 
-#include <stdio.h>
 
 #include <stdio.h>
-#define ALSA_PCM_NEW_HW_PARAMS_API
-#include <alsa/asoundlib.h>
+#include <stdio.h>
+#include <sched.h>
 
 #include "acast.h"
+
+int acast_sender_open(char* maddr, char* ifaddr, int mport,
+		      int ttl, int loop,
+		      struct sockaddr_in* addr, int* addrlen,
+		      size_t bufsize)
+{
+    int sock;
+    if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
+	uint32_t laddr = inet_addr(ifaddr);
+	int val;
+	bzero((char *)addr, sizeof(*addr));
+	addr->sin_family = AF_INET;
+	addr->sin_addr.s_addr = inet_addr(maddr);
+	addr->sin_port = htons(mport);
+	
+	setsockopt(sock,IPPROTO_IP,IP_MULTICAST_IF,(void*)&laddr,sizeof(laddr));
+	setsockopt(sock,IPPROTO_IP,IP_MULTICAST_TTL,(void*)&ttl,sizeof(ttl));
+	setsockopt(sock,IPPROTO_IP,IP_MULTICAST_LOOP,(void*)&loop,sizeof(loop));
+	val = bufsize;
+	setsockopt(sock,SOL_SOCKET,SO_SNDBUF, &val,sizeof(val));
+
+	*addrlen = sizeof(*addr);
+    }
+    return sock;
+}
+
+int acast_receiver_open(char* maddr, char* ifaddr, int mport,
+			struct sockaddr_in* addr, int* addrlen,
+			size_t bufsize)
+{
+    int sock;
+
+    if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
+	struct ip_mreq mreq;
+	int on = 1;
+	int val;
+	
+	bzero((char *)addr, sizeof(*addr));
+	addr->sin_family = AF_INET;
+	addr->sin_addr.s_addr = inet_addr(ifaddr);
+	addr->sin_port = htons(mport);
+	*addrlen = sizeof(*addr);
+
+	setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,(void*) &on, sizeof(on));
+#ifdef SO_REUSEPORT	
+	setsockopt(sock,SOL_SOCKET,SO_REUSEPORT,(void*) &on, sizeof(on));
+#endif
+	val = (int) bufsize;
+	setsockopt(sock,SOL_SOCKET,SO_RCVBUF, &val, sizeof(val));
+	
+	mreq.imr_multiaddr.s_addr = inet_addr(maddr);
+	mreq.imr_interface.s_addr = inet_addr(ifaddr);
+	if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+		       &mreq, sizeof(mreq)) < 0) {
+	    int err = errno;
+	    close(sock);
+	    errno = err;
+	    return -1;
+	}
+	if (bind(sock, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+	    int err = errno;
+	    close(sock);
+	    errno = err;
+	    return -1;
+	}
+    }
+    return sock;
+}
 
 
 void acast_clear_param(acast_params_t* in)
@@ -83,7 +150,28 @@ void acast_print(FILE* f, acast_t* acast)
     }
 }
 
-#define S_ERR(name) do { snd_function_name = #name; goto snd_error; } while(0)
+// calculate frames per packet
+snd_pcm_uframes_t acast_get_frames_per_packet(acast_params_t* pp)
+{
+    return (BYTES_PER_PACKET - sizeof(acast_t)) /
+	(pp->channels_per_frame * pp->bytes_per_channel);
+}
+
+
+#define SNDCALL(name, args...)						\
+    do {								\
+        int err;							\
+	if ((err = name(args)) < 0) {					\
+	acast_emit_error(stderr, __FILE__, __LINE__, #name, err);	\
+	return -1;							\
+	}								\
+    } while(0)
+
+void acast_emit_error(FILE* f, char* file, int line, char* function, int err)
+{
+    fprintf(f, "%s:%d: snd error %s %s\n",
+	    file, line, function, snd_strerror(err));
+}
 
 // setup audio parameters to use interleaved samples
 // and parameters from in, return parameters set in out
@@ -93,71 +181,131 @@ int acast_setup_param(snd_pcm_t *handle,
 {
     const char* snd_function_name = "unknown";
     snd_pcm_hw_params_t *params;
+    snd_pcm_sw_params_t *sparams;
     snd_pcm_format_t fmt;
-    int err;
-    int tmp;
     snd_pcm_uframes_t frames_per_packet;
-    
-    snd_pcm_hw_params_alloca(&params);
-    
-    if ((err = snd_pcm_hw_params_any(handle, params)) < 0)
-	S_ERR(snd_pcm_hw_params_any);
-    if ((err=snd_pcm_hw_params_set_access(
-	     handle, params, SND_PCM_ACCESS_RW_INTERLEAVED)) < 0)
-	S_ERR(snd_pcm_hw_params_set_access);
+    snd_pcm_uframes_t buffersize;
+    snd_pcm_uframes_t periodsize;
+    snd_pcm_uframes_t val;
 
-    if (in->format != SND_PCM_FORMAT_UNKNOWN) {
-	if ((err=snd_pcm_hw_params_set_format(handle, params, in->format)) < 0)
-	    S_ERR(snd_pcm_hw_params_set_format);
-    }
-    if ((err=snd_pcm_hw_params_get_format(params, &fmt)) < 0)
-	S_ERR(snd_pcm_hw_params_get_format);
+    snd_pcm_hw_params_alloca(&params);
+    snd_pcm_sw_params_alloca(&sparams);
+
+    SNDCALL(snd_pcm_hw_params_any, handle, params);
+    
+    SNDCALL(snd_pcm_hw_params_set_access,
+	    handle, params, SND_PCM_ACCESS_RW_INTERLEAVED);
+
+    if (in->format != SND_PCM_FORMAT_UNKNOWN)
+	SNDCALL(snd_pcm_hw_params_set_format,handle,params,in->format);
+    
+    SNDCALL(snd_pcm_hw_params_get_format,params,&fmt);
     
     out->format = fmt;
     out->bits_per_channel = snd_pcm_format_width(fmt);
     out->bytes_per_channel = snd_pcm_format_physical_width(fmt) / 8;
     
-    if (in->channels_per_frame) {
-	if ((err=snd_pcm_hw_params_set_channels(
-		 handle, params, in->channels_per_frame) < 0))
-	    S_ERR(snd_pcm_hw_params_set_channels);
-    }
+    if (in->channels_per_frame)
+	SNDCALL(snd_pcm_hw_params_set_channels,
+		handle, params, in->channels_per_frame);
 
-    if ((err=snd_pcm_hw_params_get_channels(
-	     params, &out->channels_per_frame) < 0))
-	S_ERR(snd_pcm_hw_params_get_channels);
+    SNDCALL(snd_pcm_hw_params_get_channels,params,&out->channels_per_frame);
     
     if (in->sample_rate) {
 	unsigned int val = in->sample_rate;
-	if ((err=snd_pcm_hw_params_set_rate_near(
-		 handle, params, &val, &tmp)) < 0)
-	    S_ERR(snd_pcm_hw_params_set_rate_near);
+	SNDCALL(snd_pcm_hw_params_set_rate_near, handle, params, &val, 0);
     }
-    if ((err=snd_pcm_hw_params_get_rate(params,
-					&out->sample_rate, &tmp))<0) {
-	S_ERR(snd_pcm_hw_params_get_rate);
-    }
+
+    SNDCALL(snd_pcm_hw_params_get_rate, params, &out->sample_rate, 0);
     
-    // calculate frames per packet
-    frames_per_packet = (BYTES_PER_PACKET - sizeof(acast_t)) /
-	(out->channels_per_frame * out->bytes_per_channel);
+    frames_per_packet = acast_get_frames_per_packet(out);
 
-    if ((err = snd_pcm_hw_params_set_period_size_near(
-	     handle, params, &frames_per_packet, &tmp)) < 0)
-	S_ERR(snd_pcm_hw_params_set_period_size_near);
+    buffersize = frames_per_packet*4;  // or more
+    SNDCALL(snd_pcm_hw_params_set_buffer_size_near,handle,params,&buffersize);
 
-    if ((err=snd_pcm_hw_params(handle, params)) < 0)
-	S_ERR(snd_pcm_hw_params);
+    periodsize = buffersize / 2;
+
+    SNDCALL(snd_pcm_hw_params_set_period_size_near,handle,params,&periodsize,0);
+
+    SNDCALL(snd_pcm_hw_params, handle, params);
+
+    // set soft params
+
+    SNDCALL(snd_pcm_sw_params_current,handle,sparams);
+
+    SNDCALL(snd_pcm_sw_params_set_start_threshold,handle,sparams,0x7fffffff);
+
+    SNDCALL(snd_pcm_hw_params_get_period_size, params, &val, 0);
     
-    if ((err=snd_pcm_hw_params_get_period_size(params, fpp, &tmp)) < 0)
-	S_ERR(snd_pcm_hw_params_get_period_size);	
+    SNDCALL(snd_pcm_sw_params_set_avail_min, handle, sparams, val);
+    SNDCALL(snd_pcm_sw_params, handle, sparams);
 
+    SNDCALL(snd_pcm_prepare, handle);
+    
+    *fpp = frames_per_packet;
     return 0;
+}
+
+long acast_play(snd_pcm_t* handle, size_t bytes_per_frame,
+		 char* buf, size_t len)
+{
+    long r;
+    long len0 = len;
     
-snd_error:
-    fprintf(stderr, "sound error %s %s\n",
-	    snd_function_name, snd_strerror(err));
-    return -1;
+    while(len > 0) {
+	do {
+	    r = snd_pcm_writei(handle, buf, len);
+	} while(r == -EAGAIN);
+	if (r < 0)
+	    return r;
+	if (bytes_per_frame == 0)
+	    return r;
+	buf += r*bytes_per_frame;
+	len -= (size_t) r;
+    }
+    return len0;
+}
+
+long acast_record(snd_pcm_t* handle, size_t bytes_per_frame,
+		  char* buf, size_t len)
+{
+    long r;
+    long len0 = len;
+    
+    while(len > 0) {
+	do {
+	    r = snd_pcm_readi(handle, buf, len);
+	} while (r == -EAGAIN);
+	if (r < 0)
+	    return r;
+	if (bytes_per_frame == 0)
+	    return r;
+	buf += r * bytes_per_frame;
+	len -= (size_t) r;
+    }
+    return len0;
+}
+
+
+void acast_setscheduler(void)
+{
+    struct sched_param sched_param;
+    
+    if (sched_getparam(0, &sched_param) < 0) {
+	fprintf(stderr, "sched_getparam failed: %s\n",
+		strerror(errno));
+	return;
+    }
+    
+    sched_param.sched_priority = sched_get_priority_max(SCHED_RR);
+    
+    if (sched_setscheduler(0, SCHED_RR, &sched_param) < 0) {
+	fprintf(stderr, "sched_setscheduler failed: %s\n",
+		strerror(errno));	
+	return;	
+    }
+    printf("scheduler set to Round Robin with priority %d\n",
+	   sched_param.sched_priority);
 }
 
 
@@ -178,7 +326,7 @@ static int map_8(uint8_t* src,
 
 static int map_16(uint16_t* src,
 		   unsigned int src_channels_per_frame,
-		   uint16_t* dst,		     
+		   uint16_t* dst,
 		   unsigned int dst_channels_per_frame,
 		   uint8_t* channel_map,
 		   uint32_t frames)

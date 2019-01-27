@@ -4,84 +4,173 @@
 //     open a sound device and read data samples
 //     and multicast over ip (ttl = 1)
 //
-
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <getopt.h>
+#include <sched.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <stdio.h>
-#define ALSA_PCM_NEW_HW_PARAMS_API
-#include <alsa/asoundlib.h>
-
 #include "acast.h"
 
-int setup_multicast(char* maddr, char* ifaddr, int mport,
-			int ttl, int loop,
-			struct sockaddr_in* addr, int* addrlen)
-{
-    int s;
-    if ((s = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
-	uint32_t laddr = inet_addr(ifaddr);
-	
-	bzero((char *)addr, sizeof(*addr));
-	addr->sin_family = AF_INET;
-	addr->sin_addr.s_addr = inet_addr(maddr);
-	addr->sin_port = htons(mport);
-	
-	setsockopt(s,IPPROTO_IP,IP_MULTICAST_IF,(void*)&laddr,sizeof(laddr));
-	setsockopt(s,IPPROTO_IP,IP_MULTICAST_TTL,(void*)&ttl, sizeof(ttl));
-	setsockopt(s,IPPROTO_IP,IP_MULTICAST_LOOP,(void*)&loop, sizeof(loop));	
+#define CAPTURE_DEVICE "default"
+#define NUM_CHANNELS  6
+#define CHANNEL_MAP   "012345"
 
-	*addrlen = sizeof(*addr);
-    }
-    return s;
+// ttl=0 local host, ttl=1 local network
+#define MULTICAST_TTL 1
+#define MULTICAST_LOOP 0
+
+void help(void)
+{
+printf("usage: acast_sender [options]\n"
+"  -h, --help      print help\n"
+"  -v, --verbose   increase verbosity\n"
+"  -a, --addr      multicast address (%s)\n"
+"  -i, --iface     multicast interface address (%s)\n"
+"  -p, --port      multicast address port (%d)\n"
+"  -l, --loop      enable multi cast loop (%d)\n"
+"  -t, --ttl       multicast ttl (%d)\n"
+"  -d, --device    capture device (%s)\n"
+"  -c, --channels  number of output channels (%d)\n"
+"  -m, --map       channel map (%s)\n",
+       MULTICAST_ADDR,
+       MULTICAST_IFADDR,
+       MULTICAST_PORT,
+       MULTICAST_LOOP,       
+       MULTICAST_TTL,
+       CAPTURE_DEVICE,
+       NUM_CHANNELS,
+       CHANNEL_MAP);
 }
 
-#define S_ERR(name) do { snd_function_name = #name; goto snd_error; } while(0)
+int verbose = 0;
 
 int main(int argc, char** argv)
 {
-    char* name = "default";    
+    char* capture_device_name = CAPTURE_DEVICE;
     snd_pcm_t *handle;
     acast_params_t iparam;
-    acast_params_t bparam;
+    acast_params_t oparam;
     uint32_t seqno = 0;
     snd_pcm_uframes_t frames_per_packet = 0;
-    char* snd_function_name = "unknown";
-    int s_error;
-    int tmp;
-    int s;
-    struct sockaddr_in addr;
-    int addrlen;
+    int err;
+    int sock;
     char acast_buffer[BYTES_PER_PACKET];
     acast_t* acast;
-    int multicast_loop = 1;   // loopback multicast packets
-    int multicast_ttl  = 0;   // ttl=0 local host, ttl=1 local network
+    char* multicast_addr = MULTICAST_ADDR;
+    char* multicast_ifaddr = MULTICAST_IFADDR; // interface address
+    uint16_t multicast_port = MULTICAST_PORT;    
+    int multicast_loop = MULTICAST_LOOP;       // loopback multicast packets
+    int multicast_ttl  = MULTICAST_TTL;
+    int num_output_channels = NUM_CHANNELS;    
+    uint8_t channel_map[8] = {0,1,0,0,0,0,0,0};
+    struct sockaddr_in addr;
+    int addrlen;
+    size_t bytes_per_frame;
+    size_t network_bufsize = 2*BYTES_PER_PACKET;
+    int mode = 0; // SND_PCM_NONBLOCK;
 
-    if (argc > 1)
-	name = argv[1];
-    if ((s_error=snd_pcm_open(&handle, name, SND_PCM_STREAM_CAPTURE, 0)) < 0)
-	S_ERR(snd_pcm_open);
+    while(1) {
+	int option_index = 0;
+	int c;
+	static struct option long_options[] = {
+	    {"help",   no_argument, 0,       'h'},
+	    {"verbose",no_argument, 0,       'v'},
+	    {"addr",   required_argument, 0, 'a'},
+	    {"iface",  required_argument, 0, 'i'},
+	    {"port",   required_argument, 0, 'p'},
+	    {"ttl",    required_argument, 0, 't'},
+	    {"loop",   no_argument, 0,       'l'},
+	    {"device", required_argument, 0, 'd'},
+	    {"channels",required_argument, 0, 'c'},
+	    {"map",     required_argument, 0, 'm'},
+	    {0,        0,                 0, 0}
+	};
+	
+	c = getopt_long(argc, argv, "lhva:i:p:t:d:",
+                        long_options, &option_index);
+	if (c == -1)
+	    break;
+	switch(c) {
+	case 'h':
+	    help();
+	    exit(0);
+	    break;
+	case 'v':
+	    verbose++;
+	    break;	    
+	case 'l':
+	    multicast_loop = 1;
+	    break;
+	case 't':
+	    multicast_ttl = atoi(optarg);
+	    break;	    
+	case 'd':
+	    capture_device_name = strdup(optarg);
+	    break;
+	case 'a':
+	    multicast_addr = strdup(optarg);
+	    break;
+	case 'i':
+	    multicast_ifaddr = strdup(optarg);
+	    break;
+	case 'p':
+	    multicast_port = atoi(optarg);
+	    if ((multicast_port < 1) || (multicast_port > 65535)) {
+		fprintf(stderr, "multicast port out of range\n");
+		exit(1);
+	    }
+	    break;
+	case 'c':
+	    num_output_channels = atoi(optarg);
+	    break;
+	case 'm': {
+	    char* ptr = optarg;
+	    int i = 0;
+	    while((i < 8) && isdigit(*ptr)) {
+		channel_map[i++] = (*ptr-'0');
+	    }
+	    break;
+	}
+	default:
+	    help();
+	    exit(1);
+	}
+    }
 
+    if ((err = snd_pcm_open(&handle, capture_device_name,
+			    SND_PCM_STREAM_CAPTURE, mode)) < 0) {
+	fprintf(stderr, "snd_pcm_open failed %s\n", snd_strerror(err));
+	exit(1);
+    }
     acast_clear_param(&iparam);
+
     // setup wanted paramters
     iparam.format = SND_PCM_FORMAT_S16_LE;
     iparam.sample_rate = 22000;
     iparam.channels_per_frame = 6;
-    acast_setup_param(handle, &iparam, &bparam, &frames_per_packet);
+    acast_setup_param(handle, &iparam, &oparam, &frames_per_packet);
+    bytes_per_frame = oparam.bytes_per_channel * oparam.channels_per_frame;
 
     // fill in "constant" values in the acast header
     acast = (acast_t*) acast_buffer;
-    acast->seqno              = seqno;
-    acast->num_frames         = 0;
-    acast->param              = bparam;
+    acast->seqno       = seqno;
+    acast->num_frames  = 0;
+    acast->param       = oparam;
 
     acast_print(stderr, acast);
 
-    if ((s=setup_multicast(MULTICAST_ADDR, MULTICAST_IF, MULTICAST_PORT,
-			   multicast_ttl, multicast_loop,
-			   &addr, &addrlen)) < 0) {
+    if ((sock = acast_sender_open(multicast_addr,
+				  multicast_ifaddr,
+				  multicast_port,
+				  multicast_ttl,
+				  multicast_loop,
+				  &addr, &addrlen,
+				  network_bufsize)) < 0) {
 	fprintf(stderr, "unable to open multicast socket %s\n",
 		strerror(errno));
 	exit(1);
@@ -89,22 +178,27 @@ int main(int argc, char** argv)
     
     while(1) {
 	int r;
-	size_t nbytes;
-	
-	r = snd_pcm_readi(handle, acast->data, frames_per_packet);
-	nbytes = r * bparam.bytes_per_channel * bparam.channels_per_frame;
-	
-	acast->seqno = seqno++;
-	acast->num_frames = r;
-	if (acast->seqno % 100 == 0)
-	    acast_print(stderr, acast);
-	sendto(s, acast_buffer, sizeof(acast_t)+nbytes, 0,
-	       (struct sockaddr *) &addr, addrlen);
+
+	if ((r = acast_record(handle, bytes_per_frame,
+			      acast->data, frames_per_packet)) < 0) {
+	    fprintf(stderr, "acast_read failed: %s\n", snd_strerror(r));
+	    exit(1);
+	}
+	else if (r == 0) {
+	    fprintf(stderr, "acast_read read zero bytes\n");
+	}
+	else {
+	    size_t nbytes = r * bytes_per_frame;
+	    
+	    if (r < frames_per_packet)
+		fprintf(stderr, "acast_read read shortro bytes\n");
+	    acast->seqno = seqno++;
+	    acast->num_frames = r;
+	    if (acast->seqno % 100 == 0)
+		acast_print(stderr, acast);
+	    sendto(sock, acast_buffer, sizeof(acast_t)+nbytes, 0,
+		   (struct sockaddr *) &addr, addrlen);
+	}
     }
     exit(0);
-
-snd_error:
-    fprintf(stderr, "sound error %s %s\n",
-	    snd_function_name, snd_strerror(s_error));
-    exit(1);
 }

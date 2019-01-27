@@ -7,13 +7,20 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+
+#define ALSA_PCM_NEW_HW_PARAMS_API
+#include <alsa/asoundlib.h>
+
 // default values
-#define MULTICAST_ADDR "224.0.0.2"
-#define MULTICAST_IF   "0.0.0.0"
-#define MULTICAST_PORT 22402
+#define MULTICAST_ADDR    "224.0.0.2"
+#define MULTICAST_IFADDR  "0.0.0.0"
+#define MULTICAST_PORT    22402
 
 #define BYTES_PER_PACKET 1472     // try avoid ip fragmentation
-
 
 typedef struct _acast_params_t
 {
@@ -36,9 +43,18 @@ extern void acast_clear_param(acast_params_t* acast);
 extern void acast_print_params(FILE* f, acast_params_t* params);
 extern void acast_print(FILE* f, acast_t* acast);
 
+extern snd_pcm_uframes_t acast_get_frames_per_packet(acast_params_t* pp);
+
 extern int acast_setup_param(snd_pcm_t *handle,
 			     acast_params_t* in, acast_params_t* out,
 			     snd_pcm_uframes_t* fpp);
+
+// bytes_per_frame = 0 => single write
+extern long acast_play(snd_pcm_t* handle, size_t bytes_per_frame,
+		       char* buf, size_t len);
+// bytes_per_frame = 0 => single read
+extern long acast_record(snd_pcm_t* handle, size_t bytes_per_frame,
+			 char* buf, size_t len);
 
 // rearrange interleaved channels
 // Select channels in src using channel_map
@@ -60,6 +76,16 @@ extern int interleave_channels(snd_pcm_format_t fmt,
 			       unsigned int dst_channels_per_frame,
 			       void* dst,
 			       uint8_t* channel_map,
-			       uint32_t frames);
+				   uint32_t frames);
+
+extern int acast_sender_open(char* maddr, char* ifaddr, int mport,
+				 int ttl, int loop,
+				 struct sockaddr_in* addr, int* addrlen,
+				 size_t bufsize);
+
+extern int acast_receiver_open(char* maddr, char* ifaddr, int mport,
+				   struct sockaddr_in* addr, int* addrlen,
+				   size_t bufsize);
+
 
 #endif

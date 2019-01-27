@@ -7,8 +7,8 @@ all: acast_sender acast_receiver mp3_sender acast_info
 acast_sender:	acast_sender.o  acast.o
 	$(CC) -o$@ $(LDFLAGS) acast_sender.o acast.o -lasound
 
-mp3_sender:	mp3_sender.o acast.o
-	$(CC) -o$@ $(LDFLAGS) mp3_sender.o acast.o -lmp3lame -lasound
+mp3_sender:	mp3_sender.o acast.o tick.o
+	$(CC) -o$@ $(LDFLAGS) mp3_sender.o acast.o tick.o -lmp3lame -lasound
 
 acast_receiver:	acast_receiver.o acast.o
 	$(CC) -o$@ $(LDFLAGS) acast_receiver.o  acast.o -lasound
