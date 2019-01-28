@@ -2,13 +2,16 @@ CFLAGS = -Og
 LDFLAGS = -g
 
 
-all: acast_sender acast_receiver mp3_sender acast_info
+all: acast_sender acast_receiver mp3_sender wav_sender acast_info
 
 acast_sender:	acast_sender.o  acast.o
 	$(CC) -o$@ $(LDFLAGS) acast_sender.o acast.o -lasound
 
 mp3_sender:	mp3_sender.o acast.o tick.o
 	$(CC) -o$@ $(LDFLAGS) mp3_sender.o acast.o tick.o -lmp3lame -lasound
+
+wav_sender:	wav_sender.o acast.o tick.o
+	$(CC) -o$@ $(LDFLAGS) wav_sender.o acast.o tick.o -lasound
 
 acast_receiver:	acast_receiver.o acast.o
 	$(CC) -o$@ $(LDFLAGS) acast_receiver.o  acast.o -lasound
@@ -20,3 +23,5 @@ acast_info: acast_info.o
 acast_receiver.o: acast.h
 acast_sender.o: acast.h
 acast.o: acast.h
+wav_sender.o: acast.h
+mp3_sender.o: acast.h
