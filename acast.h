@@ -39,6 +39,19 @@ typedef struct _acast_t
     uint8_t  data[0];        // audio data
 } acast_t;
 
+#define ACAST_OP_SRC1 0
+#define ACAST_OP_SRC2 1
+#define ACAST_OP_ADD  2   // src1 + src2
+#define ACAST_OP_SUB  3   // src1 - src2
+
+typedef struct _acast_op_t
+{
+    uint8_t src1;
+    uint8_t src2;
+    uint8_t dst;
+    uint8_t op;
+} acast_op_t;
+
 extern void acast_clear_param(acast_params_t* acast);
 extern void acast_print_params(FILE* f, acast_params_t* params);
 extern void acast_print(FILE* f, acast_t* acast);
@@ -51,41 +64,55 @@ extern int acast_setup_param(snd_pcm_t *handle,
 
 // bytes_per_frame = 0 => single write
 extern long acast_play(snd_pcm_t* handle, size_t bytes_per_frame,
-		       char* buf, size_t len);
+		       uint8_t* buf, size_t len);
 // bytes_per_frame = 0 => single read
 extern long acast_record(snd_pcm_t* handle, size_t bytes_per_frame,
-			 char* buf, size_t len);
+			 uint8_t* buf, size_t len);
 
 // rearrange interleaved channels
 // Select channels in src using channel_map
 // and put in dst
 //
-extern int map_channels(snd_pcm_format_t fmt,
-			unsigned int src_channels_per_frame,
-			void* src,
-			unsigned int dst_channels_per_frame,
-			void* dst,
-			uint8_t* channel_map,
+extern void map_channels(snd_pcm_format_t fmt,
+			 void* src, unsigned int src_channels_per_frame,
+			 void* dst, unsigned int dst_channels_per_frame,
+			 uint8_t* channel_map,
+			 uint32_t frames);
+
+extern void op_channels(snd_pcm_format_t fmt,
+			void* src, unsigned int src_channels_per_frame,
+			void* dst, unsigned int dst_channels_per_frame,
+			acast_op_t* channel_op, unsigned int num_ops,
 			uint32_t frames);
+
+extern void iop_channels(snd_pcm_format_t fmt,
+			 void** src,
+			 unsigned int src_channels_per_frame,
+			 void* dst, unsigned int dst_channels_per_frame,
+			 acast_op_t* channel_op, unsigned int num_ops,
+			 uint32_t frames);
 
 // interleave channel data found in src using channel_map
 // channel_map size must be >= dst_channels_per_frame
 
-extern int interleave_channels(snd_pcm_format_t fmt,
-			       void** src,
-			       unsigned int dst_channels_per_frame,
-			       void* dst,
-			       uint8_t* channel_map,
-				   uint32_t frames);
+extern void interleave_channels(snd_pcm_format_t fmt,
+				void** src,
+				unsigned int dst_channels_per_frame,
+				void* dst,
+				uint8_t* channel_map,
+				uint32_t frames);
 
 extern int acast_sender_open(char* maddr, char* ifaddr, int mport,
 				 int ttl, int loop,
-				 struct sockaddr_in* addr, int* addrlen,
+				 struct sockaddr_in* addr, socklen_t* addrlen,
 				 size_t bufsize);
 
 extern int acast_receiver_open(char* maddr, char* ifaddr, int mport,
-				   struct sockaddr_in* addr, int* addrlen,
+				   struct sockaddr_in* addr, socklen_t* addrlen,
 				   size_t bufsize);
 
+
+extern int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops);
+extern void print_channel_ops(acast_op_t* channel_op, size_t num_ops);
 
 #endif

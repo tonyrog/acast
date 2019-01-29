@@ -7,8 +7,8 @@ void card_info(int card)
 {
     int err;
     char  ctl_name[80];
-    char* name;
-    char* longname;
+    // char* name;
+    // char* longname;
     snd_ctl_t* ctl;
     snd_ctl_card_info_t* info;
 
@@ -36,7 +36,7 @@ void card_info(int card)
     snd_ctl_close(ctl);    
 }
 
-void main()
+int main(int argc, char** argv)
 {
     int totalCards = 0;   // No cards found yet
     int cardNum = -1;     // Start with first card

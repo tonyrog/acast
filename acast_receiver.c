@@ -46,19 +46,17 @@ int main(int argc, char** argv)
 {
     char* playback_device_name = PLAYBACK_DEVICE;
     snd_pcm_t *handle;
-    uint32_t seqno = 0;
     int err;
-    int tmp;
     int sock;
     int len;
     char* multicast_addr = MULTICAST_ADDR;
     char* multicast_ifaddr = MULTICAST_IFADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
     struct sockaddr_in addr;
-    int addrlen;
-    char acast_buffer[BYTES_PER_PACKET];
-    char silence_buffer[BYTES_PER_PACKET];
-    char snd_buffer[BYTES_PER_PACKET];
+    socklen_t addrlen;
+    uint8_t acast_buffer[BYTES_PER_PACKET];
+    uint8_t silence_buffer[BYTES_PER_PACKET];
+    uint8_t snd_buffer[BYTES_PER_PACKET];
     acast_t* acast;
     acast_t* silence;
     uint32_t last_seqno = 0;
@@ -193,10 +191,8 @@ int main(int argc, char** argv)
 	    }
 	    // rearrange data by select channels wanted
 	    map_channels(oparam.format,
-			 acast->param.channels_per_frame,
-			 acast->data,
-			 oparam.channels_per_frame,
-			 snd_buffer,
+			 acast->data, acast->param.channels_per_frame,
+			 snd_buffer, oparam.channels_per_frame,
 			 channel_map,
 			 acast->num_frames);
 

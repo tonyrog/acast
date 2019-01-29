@@ -66,10 +66,10 @@ int main(int argc, char** argv)
     uint16_t multicast_port = MULTICAST_PORT;    
     int multicast_loop = MULTICAST_LOOP;       // loopback multicast packets
     int multicast_ttl  = MULTICAST_TTL;
-    int num_output_channels = NUM_CHANNELS;    
-    uint8_t channel_map[8] = {0,1,0,0,0,0,0,0};
+    int num_output_channels = NUM_CHANNELS;
+    uint8_t channel_map[8] = {0,1,0,1,0,0,0,0};    
     struct sockaddr_in addr;
-    int addrlen;
+    socklen_t addrlen;
     size_t bytes_per_frame;
     size_t network_bufsize = 2*BYTES_PER_PACKET;
     int mode = 0; // SND_PCM_NONBLOCK;

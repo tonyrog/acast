@@ -1,8 +1,7 @@
 //
-//  mp3_sender
+//  mp3_player
 //
-//     open a mp3 file and read data samples
-//     and multicast over ip (ttl = 1)
+//     open a mp3 file and play data samples
 //
 
 #include <stdio.h>
@@ -21,11 +20,11 @@
 #include "tick.h"
 
 #define PLAYBACK_DEVICE "default"
-// ttl=0 local host, ttl=1 local network
-#define MULTICAST_TTL  1
-#define MULTICAST_LOOP 0
 #define NUM_CHANNELS   2
-#define CHANNEL_MAP   "01"
+
+#define CHANNEL_MAP   "auto"
+#define MAX_CHANNEL_OP  16
+#define MAX_CHANNEL_MAP 8
 
 #define MAX_U_32_NUM    0xFFFFFFFF
 #define MP3BUFFER_SIZE  4096
@@ -37,6 +36,9 @@ uint8_t* in_id3v2_tag = NULL;
 
 int verbose = 0;
 int debug = 0;
+
+#define min(a,b) (((a)<(b)) ? (a) : (b))
+#define max(a,b) (((a)>(b)) ? (a) : (b))
 
 void emit_message(const char* format, va_list ap)
 {
@@ -257,24 +259,26 @@ void help(void)
 printf("usage: mp3_sender [options] file\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
-"  -D, --debug     debug verbosity\n"              
-"  -a, --addr      multicast address (\"%s\")\n"
-"  -i, --iface     multicast interface address (\"%s\")\n"
-"  -p, --port      multicast address port (%d)\n"
-"  -l, --loop      enable multi cast loop (%d)\n"
-"  -t, --ttl       multicast ttl (%d)\n"
+"  -D, --debug     debug verbosity\n"
 "  -d, --device    playback device (\"%s\")\n"
 "  -c, --channels  number of output channels (%d)\n"
 "  -m, --map       channel map (\"%s\")\n",       
-       MULTICAST_ADDR,
-       MULTICAST_IFADDR,
-       MULTICAST_PORT,
-       MULTICAST_LOOP,       
-       MULTICAST_TTL,
        PLAYBACK_DEVICE,
        NUM_CHANNELS,
        CHANNEL_MAP);       
 }
+
+static inline uint32_t mp3_get_bytes_per_frame(mp3data_struct* mp3)
+{
+    return mp3->stereo*2;  // 2 byte per channel 
+}
+
+static inline snd_pcm_uframes_t mp3_get_frames_per_buffer(mp3data_struct* mp3,
+							  size_t buffer_size)
+{
+    return buffer_size / mp3_get_bytes_per_frame(mp3);
+}
+
 
 int main(int argc, char** argv)
 {
@@ -282,20 +286,14 @@ int main(int argc, char** argv)
     char* filename;
     snd_pcm_t *handle;
     acast_params_t iparam;
-    acast_params_t bparam;
-    snd_pcm_uframes_t frames_per_packet;    
+    acast_params_t sparam;
+    snd_pcm_uframes_t mp3_frames_per_packet;
+    snd_pcm_uframes_t snd_frames_per_packet;    
+    snd_pcm_uframes_t frames_per_packet;
+    size_t snd_bytes_per_frame;    
+    size_t bytes_per_frame;    
     uint32_t seqno = 0;
     int err;
-    int s;
-    char acast_buffer[BYTES_PER_PACKET];
-    acast_t* acast;
-    char* multicast_addr = MULTICAST_ADDR;
-    char* multicast_ifaddr = MULTICAST_IFADDR;    // interface address
-    uint16_t multicast_port = MULTICAST_PORT;
-    int multicast_loop = MULTICAST_LOOP;   // loopback multicast packets
-    int multicast_ttl  = MULTICAST_TTL;
-    struct sockaddr_in addr;
-    socklen_t addrlen;
     hip_t hip;
     snd_pcm_format_t fmt;    
     mp3data_struct mp3;
@@ -305,17 +303,15 @@ int main(int argc, char** argv)
     int fd;
     int num_frames;
     int enc_delay, enc_padding;
-    int do_play = 0;
-    int do_send = 1;
-    int num_output_channels = NUM_CHANNELS;
-    uint8_t channel_map[8] = {0,1,0,1,0,0,0,0};
-    size_t bytes_per_frame;
-    size_t network_bufsize = 4*BYTES_PER_PACKET;
-    tick_t last_time;
-    tick_t first_time = 0;
-    tick_t send_time = 0;
-    uint64_t frame_delay_us;  // delay per frame in us
-    uint64_t sent_frames;     // number of frames sent
+    int num_output_channels = 0;    
+    char* map = CHANNEL_MAP;
+    acast_op_t channel_op[MAX_CHANNEL_OP];
+    uint8_t    channel_map[MAX_CHANNEL_MAP];    
+    int        num_channel_ops;
+    int        use_channel_map = 0;  // prefer simple map if possible
+    int        id_channel_map = 0;   // one to one map
+    char       silence_buffer[BYTES_PER_PACKET];
+    acast_t*   silence;    
     int mode = 0; // SND_PCM_NONBLOCK;
     
     while(1) {
@@ -325,18 +321,13 @@ int main(int argc, char** argv)
 	    {"help",   no_argument, 0,       'h'},
 	    {"verbose",no_argument, 0,       'v'},
 	    {"debug",  no_argument, 0,       'D'},
-	    {"addr",   required_argument, 0, 'a'},
-	    {"iface",  required_argument, 0, 'i'},
-	    {"port",   required_argument, 0, 'p'},
-	    {"ttl",    required_argument, 0, 't'},
-	    {"loop",   no_argument, 0,       'l'},
 	    {"device", required_argument, 0, 'd'},
 	    {"channels",required_argument, 0, 'c'},
 	    {"map",     required_argument, 0, 'm'},	    
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhvDa:i:p:t:d:c:m:",
+	c = getopt_long(argc, argv, "hvDd:c:m:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -352,39 +343,14 @@ int main(int argc, char** argv)
 	    verbose++;
 	    debug = 1;
 	    break;	    
-	case 'l':
-	    multicast_loop = 1;
-	    break;
-	case 't':
-	    multicast_ttl = atoi(optarg);
-	    break;	    
-	case 'd':
 	    playback_device_name = strdup(optarg);
-	    break;
-	case 'a':
-	    multicast_addr = strdup(optarg);
-	    break;
-	case 'i':
-	    multicast_ifaddr = strdup(optarg);
-	    break;
-	case 'p':
-	    multicast_port = atoi(optarg);
-	    if ((multicast_port < 1) || (multicast_port > 65535)) {
-		fprintf(stderr, "multicast port out of range\n");
-		exit(1);
-	    }
 	    break;
 	case 'c':
 	    num_output_channels = atoi(optarg);
 	    break;
-	case 'm': {
-	    char* ptr = optarg;
-	    int i = 0;
-	    while((i < 8) && isdigit(*ptr)) {
-		channel_map[i++] = (*ptr-'0');
-	    }
-	    break;
-	}	    
+	case 'm':
+	    map = strdup(optarg);
+	    break;	    
 	default:
 	    help();
 	    exit(1);	    
@@ -405,11 +371,7 @@ int main(int argc, char** argv)
 
     time_tick_init();
     
-    memset(acast_buffer, 0, sizeof(acast_buffer));
-    acast = (acast_t*) acast_buffer;
-    acast->seqno = 0;
-    acast->num_frames = 0;
-    acast_clear_param(&acast->param);
+    seqno = 0;
     
     if ((hip = hip_decode_init()) == NULL) {
 	perror("hip_decode_init");
@@ -420,11 +382,77 @@ int main(int argc, char** argv)
     hip_set_errorf(hip, verbose ? emit_error : 0);
     hip_set_debugf(hip, emit_debug);
 
+    time_tick_init();    
+
     if (mp3_decode_init(fd, hip, &mp3, &enc_delay, &enc_padding) < 0) {
 	fprintf(stderr, "failed detect mp3 file format\n");
 	exit(1);
     }
+
+    mp3_frames_per_packet =
+	mp3_get_frames_per_buffer(&mp3,BYTES_PER_PACKET - sizeof(acast_t));    
+
+    // normally we want to acast 6 channels but now we select the
+    // native mp3 format for testing
+
+    if (strcmp(map, "auto") == 0) {
+	int i, n;
+
+	n = (num_output_channels == 0) ? mp3.stereo : num_output_channels;
+	for (i = 0; i < n; i++) {
+	    channel_op[i].op = ACAST_OP_SRC1;
+	    channel_op[i].src1 = i % mp3.stereo;
+	    channel_op[i].src2 = 0;
+	    channel_op[i].dst = i;
+	}
+	num_channel_ops = n;
+    }
+    else {
+	if ((num_channel_ops = parse_channel_ops(map, channel_op,
+						 MAX_CHANNEL_OP)) < 0) {
+	    fprintf(stderr, "map synatx error\n");
+	    exit(1);
+	}
+    }
     
+    { // try build a simple channel_map
+	int i;
+	int max_dst_channel = -1;
+
+	use_channel_map = 1;
+	id_channel_map = 1;
+	
+	for (i = 0; (i < num_channel_ops) && (i < MAX_CHANNEL_MAP); i++) {
+	    if (channel_op[i].dst > max_dst_channel)
+		max_dst_channel = channel_op[i].dst;
+	    if ((channel_op[i].dst != i) ||
+		(channel_op[i].op != ACAST_OP_SRC1)) {
+		use_channel_map = 0;
+		id_channel_map = 0;
+	    }
+	    else if (use_channel_map) {
+		channel_map[i] = channel_op[i].src1;
+		if (channel_map[i] != i)
+		    id_channel_map = 0;
+	    }
+	}
+	if (i >= MAX_CHANNEL_MAP)
+	    use_channel_map = 0;
+	
+	if (num_output_channels == 0)
+	    num_output_channels = max_dst_channel+1;
+	if (num_output_channels != mp3.stereo)
+	    id_channel_map = 0;
+    }
+
+    if (verbose) {
+	printf("Channel map: ");
+	print_channel_ops(channel_op, num_channel_ops);
+	printf("use_channel_map: %d\n", use_channel_map);
+	printf("id_channel_map: %d\n", id_channel_map);
+	printf("num_output_channels = %d\n", num_output_channels);
+    }
+
     if (verbose > 1) {
 	mp3_print(&mp3);
 	fprintf(stderr, "enc_delay=%d\n", enc_delay);
@@ -432,54 +460,53 @@ int main(int argc, char** argv)
     }
 
     fmt = SND_PCM_FORMAT_S16_LE;
-    sent_frames = 0;
 
-    if (do_send) {
-	if ((s=acast_sender_open(multicast_addr,
-				 multicast_ifaddr,
-				 multicast_port,
-				 multicast_ttl,
-				 multicast_loop,
-				 &addr, &addrlen,
-				 network_bufsize)) < 0) {
-	    fprintf(stderr, "unable to open multicast socket %s\n",
-		    strerror(errno));
-	    exit(1);
-	}
-	bparam.format = fmt;
-	bparam.sample_rate = mp3.samplerate;
-	bparam.channels_per_frame = num_output_channels;
-	bparam.bits_per_channel = snd_pcm_format_width(fmt);
-	bparam.bytes_per_channel = snd_pcm_format_physical_width(fmt) / 8;
-	bytes_per_frame = bparam.bytes_per_channel*bparam.channels_per_frame;
-	frames_per_packet = acast_get_frames_per_packet(&bparam);
-	frame_delay_us = (frames_per_packet*1000000) / bparam.sample_rate;
+    if ((err=snd_pcm_open(&handle,playback_device_name,
+			  SND_PCM_STREAM_PLAYBACK,mode)) < 0) {
+	fprintf(stderr, "snd_pcm_open failed %s\n", snd_strerror(err));
+	exit(1);
     }
-    
-    if (do_play) {
-	if ((err=snd_pcm_open(&handle,playback_device_name,
-			      SND_PCM_STREAM_PLAYBACK,mode)) < 0) {
-	    fprintf(stderr, "snd_pcm_open failed %s\n", snd_strerror(err));
-	    exit(1);
-	}
-	acast_clear_param(&iparam);
-	// setup wanted paramters
-	iparam.format = fmt;
-	iparam.sample_rate = mp3.samplerate;
-	iparam.channels_per_frame = mp3.stereo;
-	acast_setup_param(handle, &iparam, &bparam, &frames_per_packet);
-	bytes_per_frame = bparam.bytes_per_channel*bparam.channels_per_frame;
-    }
-    
-    if (verbose > 1) {
-	acast_print_params(stderr, &bparam);
-	fprintf(stderr, "frames_per_packet=%ld\n", frames_per_packet);
-    }
-    
-    acast->param = bparam;
 
+    acast_clear_param(&iparam);
+    // setup wanted paramters
+    iparam.format = fmt;
+    iparam.sample_rate = mp3.samplerate;
+    iparam.channels_per_frame = num_output_channels;
+    acast_setup_param(handle, &iparam, &sparam, &snd_frames_per_packet);
+    snd_bytes_per_frame =
+	sparam.bytes_per_channel*sparam.channels_per_frame;
+
+    if (verbose) {
+	fprintf(stderr, "snd params:\n");
+	acast_print_params(stderr, &sparam);
+	fprintf(stderr, "  snd_bytes_per_frame:%ld\n",
+		snd_bytes_per_frame);
+	fprintf(stderr, "  snd_frames_per_packet:%ld\n",
+		snd_frames_per_packet);
+	fprintf(stderr, "----------------\n");
+    }    
+    
+    silence =  (acast_t*) silence_buffer;
+    silence->num_frames = snd_frames_per_packet;
+    snd_pcm_format_set_silence(sparam.format, silence->data,
+			       snd_frames_per_packet*snd_bytes_per_frame);
+    acast_play(handle, snd_bytes_per_frame,
+	       silence->data, silence->num_frames);
+    acast_play(handle, snd_bytes_per_frame,
+	       silence->data, silence->num_frames);
+    snd_pcm_start(handle);	
+    
+    frames_per_packet = min(snd_frames_per_packet,mp3_frames_per_packet);
+
+    bytes_per_frame = num_output_channels * sparam.bytes_per_channel;
+
+    if (verbose) {
+	fprintf(stderr, "  num_output_channels:%d\n", num_output_channels);
+	fprintf(stderr, "  bytes_per_frame:%ld\n",  bytes_per_frame);
+	fprintf(stderr, "  frames_per_packet:%ld\n", frames_per_packet);
+    }
+    
     pcm_remain = 0;  // samples that remain from last round
-    last_time = time_tick_now();
     
     while((num_frames = mp3_decode(fd, hip,
 				   &pcm_l[pcm_remain],
@@ -487,63 +514,42 @@ int main(int argc, char** argv)
 	void* channels[2];
 	int16_t *lptr = pcm_l;
 	int16_t *rptr = pcm_r;
+	char dst_buffer[BYTES_PER_PACKET];
+	acast_t* dst;	
 
 	num_frames += pcm_remain;
+
+	dst = (acast_t*) dst_buffer;
+	dst->param = sparam;
 	
 	while(num_frames >= frames_per_packet) {
 	    channels[0] = (void*) lptr;
 	    channels[1] = (void*) rptr;
-	
-	    interleave_channels(bparam.format, channels,
-				acast->param.channels_per_frame,
-				acast->data,
-				channel_map,
-				frames_per_packet);
+
+	    if (use_channel_map) {
+		interleave_channels(sparam.format,
+				    channels, sparam.channels_per_frame,
+				    dst->data, channel_map,
+				    frames_per_packet);
+	    }
+	    else {
+		iop_channels(sparam.format,
+			     channels, 2,
+			     dst->data, num_output_channels,
+			     channel_op, num_channel_ops,
+			     frames_per_packet);
+	    }
 
 	    lptr += frames_per_packet;
 	    rptr += frames_per_packet;	    
 	    
-	    acast->seqno = seqno++;
-	    acast->num_frames = frames_per_packet;
-	    if ((verbose > 3) && (acast->seqno % 100 == 0)) {
-		acast_print(stderr, acast);
+	    dst->seqno = seqno++;
+	    dst->num_frames = frames_per_packet;
+	    
+	    if ((verbose > 3) && (seqno % 100 == 0)) {
+		acast_print(stderr, dst);
 	    }
-	    if (do_send) {
-		size_t nbytes = bytes_per_frame*acast->num_frames;
-		if (sendto(s, acast_buffer, sizeof(acast_t)+nbytes, 0,
-			   (struct sockaddr *) &addr, addrlen) < 0) {
-		    fprintf(stderr, "failed to send frame %s\n",
-			    strerror(errno));
-		}
-		else {
-		    sent_frames++;
-		    if ((sent_frames & 0xff) == 0) {
-			if (verbose > 1) {
-			    fprintf(stderr, "SEND RATE = %ldHz, %.2fMb/s\n",
-				    (1000000*sent_frames*frames_per_packet)/
-				    (last_time-first_time),
-
-				    ((1000000*sent_frames*8*BYTES_PER_PACKET)/
-				     (double)(last_time-first_time)) /
-				    (double)(1024*1024));
-			}
-		    }
-		    if (sent_frames == 1) {
-			first_time = last_time;
-			send_time = first_time;
-		    }
-		}
-	    }
-	    if (do_play) {
-		acast_play(handle, bytes_per_frame,
-			   acast->data, acast->num_frames);
-	    }
-	    if (do_send && !do_play) {
-		last_time = time_tick_wait_until(send_time +
-						 frame_delay_us-enc_delay);
-		// send_time is the absolute send time mark
-		send_time += frame_delay_us;
-	    }
+	    acast_play(handle, bytes_per_frame, dst->data, dst->num_frames);
 	    num_frames -= frames_per_packet;
 	}
 	if (num_frames) {

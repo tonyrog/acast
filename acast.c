@@ -3,13 +3,14 @@
 
 #include <stdio.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <sched.h>
 
 #include "acast.h"
 
 int acast_sender_open(char* maddr, char* ifaddr, int mport,
 		      int ttl, int loop,
-		      struct sockaddr_in* addr, int* addrlen,
+		      struct sockaddr_in* addr, socklen_t* addrlen,
 		      size_t bufsize)
 {
     int sock;
@@ -33,7 +34,7 @@ int acast_sender_open(char* maddr, char* ifaddr, int mport,
 }
 
 int acast_receiver_open(char* maddr, char* ifaddr, int mport,
-			struct sockaddr_in* addr, int* addrlen,
+			struct sockaddr_in* addr, socklen_t* addrlen,
 			size_t bufsize)
 {
     int sock;
@@ -87,11 +88,11 @@ void acast_clear_param(acast_params_t* in)
 
 void acast_print_params(FILE* f, acast_params_t* param)
 {
-    fprintf(f, "format: %s\n", snd_pcm_format_name(param->format));
-    fprintf(f, "channels_per_frame: %u\n", param->channels_per_frame);
-    fprintf(f, "bits_per_channel: %u\n", param->bits_per_channel);
-    fprintf(f, "bytes_per_channel: %u\n", param->bytes_per_channel);
-    fprintf(f, "sample_rate: %u\n", param->sample_rate);
+    fprintf(f, "  format: %s\n", snd_pcm_format_name(param->format));
+    fprintf(f, "  channels_per_frame: %u\n", param->channels_per_frame);
+    fprintf(f, "  bits_per_channel: %u\n", param->bits_per_channel);
+    fprintf(f, "  bytes_per_channel: %u\n", param->bytes_per_channel);
+    fprintf(f, "  sample_rate: %u\n", param->sample_rate);
 }
 
 void acast_print(FILE* f, acast_t* acast)
@@ -179,7 +180,6 @@ int acast_setup_param(snd_pcm_t *handle,
 		      acast_params_t* in, acast_params_t* out,
 		      snd_pcm_uframes_t* fpp)
 {
-    const char* snd_function_name = "unknown";
     snd_pcm_hw_params_t *params;
     snd_pcm_sw_params_t *sparams;
     snd_pcm_format_t fmt;
@@ -247,7 +247,7 @@ int acast_setup_param(snd_pcm_t *handle,
 }
 
 long acast_play(snd_pcm_t* handle, size_t bytes_per_frame,
-		 char* buf, size_t len)
+		uint8_t* buf, size_t len)
 {
     long r;
     long len0 = len;
@@ -267,7 +267,7 @@ long acast_play(snd_pcm_t* handle, size_t bytes_per_frame,
 }
 
 long acast_record(snd_pcm_t* handle, size_t bytes_per_frame,
-		  char* buf, size_t len)
+		  uint8_t* buf, size_t len)
 {
     long r;
     long len0 = len;
@@ -309,7 +309,7 @@ void acast_setscheduler(void)
 }
 
 
-static int map_8(uint8_t* src,
+static void map_8(uint8_t* src,
 		  unsigned int src_channels_per_frame,
 		  uint8_t* dst,		     
 		  unsigned int dst_channels_per_frame,
@@ -324,7 +324,7 @@ static int map_8(uint8_t* src,
     }
 }
 
-static int map_16(uint16_t* src,
+static void map_16(uint16_t* src,
 		   unsigned int src_channels_per_frame,
 		   uint16_t* dst,
 		   unsigned int dst_channels_per_frame,
@@ -339,7 +339,7 @@ static int map_16(uint16_t* src,
     }
 }
 
-static int map_32(uint32_t* src,
+static void map_32(uint32_t* src,
 		  unsigned int src_channels_per_frame,
 		  uint32_t* dst,		     
 		  unsigned int dst_channels_per_frame,
@@ -354,15 +354,13 @@ static int map_32(uint32_t* src,
     }
 }
 
-// rearange interleaved channels
+// rearrange interleaved channels
 // select channels by channel_map from src and put into dst
-int map_channels(snd_pcm_format_t fmt,
-		 unsigned int src_channels_per_frame,
-		 void* src,
-		 unsigned int dst_channels_per_frame,		  
-		 void* dst,
-		 uint8_t* channel_map,
-		 uint32_t frames)
+void map_channels(snd_pcm_format_t fmt,
+		  void* src, unsigned int src_channels_per_frame,
+		  void* dst, unsigned int dst_channels_per_frame,
+		  uint8_t* channel_map,
+		  uint32_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
@@ -383,7 +381,7 @@ int map_channels(snd_pcm_format_t fmt,
     }
 }
 
-static int inter_8(uint8_t** src,
+static void inter_8(uint8_t** src,
 		   unsigned int dst_channels_per_frame,
 		   uint8_t* dst,
 		   uint8_t* channel_map,
@@ -396,11 +394,11 @@ static int inter_8(uint8_t** src,
 	    *dst++ = src[channel_map[i]][s];
 }
 
-static int inter_16(uint16_t** src,
-		    unsigned int dst_channels_per_frame,
-		    uint16_t* dst,
-		    uint8_t* channel_map,
-		    uint32_t frames)
+static void inter_16(uint16_t** src,
+		     unsigned int dst_channels_per_frame,
+		     uint16_t* dst,
+		     uint8_t* channel_map,
+		     uint32_t frames)
 {
     int s, i;
 
@@ -409,11 +407,11 @@ static int inter_16(uint16_t** src,
 	    *dst++ = src[channel_map[i]][s];
 }
 
-static int inter_32(uint32_t** src,
-		    unsigned int dst_channels_per_frame,
-		    uint32_t* dst,
-		    uint8_t* channel_map,
-		    uint32_t frames)
+static void inter_32(uint32_t** src,
+		     unsigned int dst_channels_per_frame,
+		     uint32_t* dst,
+		     uint8_t* channel_map,
+		     uint32_t frames)
 {
     int s, i;
 
@@ -423,12 +421,12 @@ static int inter_32(uint32_t** src,
 }
 
 // interleave channels using channel map
-int interleave_channels(snd_pcm_format_t fmt,
-			void** src,
-			unsigned int dst_channels_per_frame,
-			void* dst,
-			uint8_t* channel_map,
-			uint32_t frames)
+void interleave_channels(snd_pcm_format_t fmt,
+			 void** src,
+			 unsigned int dst_channels_per_frame,
+			 void* dst,
+			 uint8_t* channel_map,
+			 uint32_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
@@ -450,3 +448,308 @@ int interleave_channels(snd_pcm_format_t fmt,
 }
 
 
+static void op_u8(uint8_t* src,
+		  unsigned int src_channels_per_frame,
+		  uint8_t* dst,
+		  unsigned int dst_channels_per_frame,
+		  acast_op_t* channel_op,
+		  unsigned int num_ops,		 
+		  uint32_t frames)
+{
+    while(frames--) {
+	int i;
+	for (i = 0;  i < num_ops; i++) {
+	    uint8_t src1 = src[channel_op[i].src1];
+	    uint8_t src2 = src[channel_op[i].src2];
+	    switch(channel_op[i].op) {
+	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
+	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
+	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
+	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
+	    }
+	}
+	dst += dst_channels_per_frame;	
+	src += src_channels_per_frame;
+    }
+}
+
+static void op_i16(int16_t* src,
+		   unsigned int src_channels_per_frame,
+		   int16_t* dst,		     
+		   unsigned int dst_channels_per_frame,
+		   acast_op_t* channel_op,
+		   unsigned int num_ops,		 
+		   uint32_t frames)
+{
+    while(frames--) {
+	int i;
+	for (i = 0;  i < num_ops; i++) {
+	    int16_t src1 = src[channel_op[i].src1];
+	    int16_t src2 = src[channel_op[i].src2];
+	    switch(channel_op[i].op) {
+	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
+	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
+	    case ACAST_OP_ADD: {
+		int32_t sum = src1+src2;
+		if (sum > 32767) sum = 32767;
+		else if (sum < -32768) sum = -32768;
+		dst[channel_op[i].dst] = sum;
+		break;
+	    }
+	    case ACAST_OP_SUB: {
+		int32_t sum = src1-src2;
+		if (sum > 32767) sum = 32767;
+		else if (sum < -32768) sum = -32768;
+		dst[channel_op[i].dst] = sum;
+		break;
+	    }
+	    }
+	}
+	dst += dst_channels_per_frame;
+	src += src_channels_per_frame;
+    }
+}
+
+
+static void op_i32(int32_t* src,
+		   unsigned int src_channels_per_frame,
+		   int32_t* dst,		     
+		   unsigned int dst_channels_per_frame,
+		   acast_op_t* channel_op,
+		   unsigned int num_ops,		 
+		   uint32_t frames)
+{
+    while(frames--) {
+	int i;
+	for (i = 0;  i < num_ops; i++) {
+	    int32_t src1 = src[channel_op[i].src1];
+	    int32_t src2 = src[channel_op[i].src2];
+	    switch(channel_op[i].op) {
+	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
+	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
+	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
+	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
+	    }
+	}
+	dst += dst_channels_per_frame;	
+	src += src_channels_per_frame;
+    }
+}
+
+// rearrange interleaved channels with operation
+// select input channel src1, src2 and put result in output channel dst
+//
+void op_channels(snd_pcm_format_t fmt,
+		 void* src, unsigned int src_channels_per_frame,
+		 void* dst, unsigned int dst_channels_per_frame,
+		 acast_op_t* channel_op, unsigned int num_ops,
+		 uint32_t frames)
+{
+    switch(snd_pcm_format_physical_width(fmt)) {
+    case 8:
+	op_u8(src, src_channels_per_frame,
+	      dst, dst_channels_per_frame,
+	      channel_op, num_ops,
+	      frames);
+	break;
+    case 16:
+	op_i16((int16_t*)src, src_channels_per_frame,
+	       (int16_t*)dst, dst_channels_per_frame,
+	       channel_op, num_ops,
+	       frames);
+	break;	
+    case 32:
+	op_i32((int32_t*)src, src_channels_per_frame,
+	       (int32_t*)dst, dst_channels_per_frame,
+	       channel_op, num_ops,	      
+	       frames);
+	break;
+    }
+}
+
+
+
+static void iop_u8(uint8_t** src,
+		   unsigned int src_channels_per_frame,
+		   uint8_t* dst,
+		   unsigned int dst_channels_per_frame,
+		   acast_op_t* channel_op,
+		   unsigned int num_ops,		 
+		   uint32_t frames)
+{
+    int j;
+    for (j = 0; j < frames; j++) {
+	int i;
+	for (i = 0;  i < num_ops; i++) {
+	    uint8_t src1 = src[channel_op[i].src1][j];
+	    uint8_t src2 = src[channel_op[i].src2][j];
+	    switch(channel_op[i].op) {
+	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
+	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
+	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
+	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
+	    }
+	}
+	dst += dst_channels_per_frame;	
+    }
+}
+
+static void iop_i16(int16_t** src,
+		    unsigned int src_channels_per_frame,
+		    int16_t* dst,		     
+		    unsigned int dst_channels_per_frame,
+		    acast_op_t* channel_op,
+		    unsigned int num_ops,		 
+		    uint32_t frames)
+{
+    int j;
+    for (j = 0; j < frames; j++) {    
+	int i;
+	for (i = 0;  i < num_ops; i++) {
+	    int16_t src1 = src[channel_op[i].src1][j];
+	    int16_t src2 = src[channel_op[i].src2][j];
+	    switch(channel_op[i].op) {
+	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
+	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
+	    case ACAST_OP_ADD: {
+		int32_t sum = src1+src2;
+		if (sum > 32767) sum = 32767;
+		else if (sum < -32768) sum = -32768;
+		dst[channel_op[i].dst] = sum;
+		break;
+	    }
+	    case ACAST_OP_SUB: {
+		int32_t sum = src1-src2;
+		if (sum > 32767) sum = 32767;
+		else if (sum < -32768) sum = -32768;
+		dst[channel_op[i].dst] = sum;
+		break;
+	    }
+	    }
+	}
+	dst += dst_channels_per_frame;
+    }
+}
+
+
+static void iop_i32(int32_t** src,
+		    unsigned int src_channels_per_frame,
+		    int32_t* dst,		     
+		    unsigned int dst_channels_per_frame,
+		    acast_op_t* channel_op,
+		    unsigned int num_ops,		 
+		    uint32_t frames)
+{
+    int j;
+    for (j = 0; j < frames; j++) {        
+	int i;
+	for (i = 0;  i < num_ops; i++) {
+	    int32_t src1 = src[channel_op[i].src1][j];
+	    int32_t src2 = src[channel_op[i].src2][j];
+	    switch(channel_op[i].op) {
+	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
+	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
+	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
+	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
+	    }
+	}
+	dst += dst_channels_per_frame;	
+    }
+}
+
+
+// rearrange interleaved channels with operation
+// select input channel src1, src2 and put result in output channel dst
+//
+void iop_channels(snd_pcm_format_t fmt,
+		  void** src, unsigned int src_channels_per_frame,  
+		  void* dst, unsigned int dst_channels_per_frame,
+		  acast_op_t* channel_op, unsigned int num_ops,
+		  uint32_t frames)
+{
+    switch(snd_pcm_format_physical_width(fmt)) {
+    case 8:
+	iop_u8((uint8_t**)src, src_channels_per_frame,
+	       dst, dst_channels_per_frame,
+	       channel_op, num_ops,
+	       frames);
+	break;
+    case 16:
+	iop_i16((int16_t**)src, src_channels_per_frame,
+		(int16_t*)dst, dst_channels_per_frame,
+		channel_op, num_ops,
+		frames);
+	break;	
+    case 32:
+	iop_i32((int32_t**)src, src_channels_per_frame,
+		(int32_t*)dst, dst_channels_per_frame,
+		channel_op, num_ops,	      
+		frames);
+	break;
+    }
+}
+
+
+int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops)
+{
+    int i = 0;
+    char* ptr = map;
+
+    while((i < max_ops) && (*ptr != '\0')) {
+	switch(ptr[0]) {
+	case '+':
+	    if (!isdigit(ptr[1]) || !isdigit(ptr[2]))
+		return -1;
+	    channel_op[i].src1 = ptr[1]-'0';
+	    channel_op[i].src2 = ptr[2]-'0';
+	    channel_op[i].dst  = i;
+	    channel_op[i].op   = ACAST_OP_ADD;
+	    ptr += 3;	    
+	    break;
+	case '-':
+	    if (!isdigit(ptr[1]) || !isdigit(ptr[2]))
+		return -1;
+	    channel_op[i].src1 = ptr[1]-'0';
+	    channel_op[i].src2 = ptr[2]-'0';
+	    channel_op[i].dst  = i;
+	    channel_op[i].op   = ACAST_OP_SUB;
+	    ptr += 3;
+	    break;
+	default:
+	    if (!isdigit(ptr[0]))
+		return -1;
+	    channel_op[i].src1 = ptr[0]-'0';
+	    channel_op[i].src2 = ptr[0]-'0';
+	    channel_op[i].dst  = i;
+	    channel_op[i].op   = ACAST_OP_SRC1;
+	    ptr += 1;	    
+	    break;
+	}
+	i++;
+    }
+    if (*ptr == '\0')
+	return i;
+    return -1;
+}
+
+void print_channel_ops(acast_op_t* channel_op, size_t num_ops)
+{
+    int i;
+    for (i = 0; i < num_ops; i++) {
+	switch(channel_op[i].op) {
+	case ACAST_OP_SRC1:
+	    printf("%d", channel_op[i].src1);
+	    break;
+	case ACAST_OP_SRC2:
+	    printf("%d", channel_op[i].src2);
+	    break;
+	case ACAST_OP_ADD:
+	    printf("+%d%d", channel_op[i].src1, channel_op[i].src2);
+	    break;
+	case ACAST_OP_SUB:
+	    printf("-%d%d", channel_op[i].src1, channel_op[i].src2);
+	    break;
+	}
+    }
+    printf("\n");
+}
