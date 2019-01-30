@@ -84,9 +84,7 @@ int main(int argc, char** argv)
     acast_params_t mparam;
     snd_pcm_uframes_t frames_per_packet;    
     uint32_t seqno = 0;
-    int s;
-    char acast_buffer[BYTES_PER_PACKET];
-    acast_t* acast;
+    int sock;
     char* multicast_addr = MULTICAST_ADDR;
     char* multicast_ifaddr = MULTICAST_IFADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
@@ -197,12 +195,6 @@ int main(int argc, char** argv)
 
     time_tick_init();
     
-    memset(acast_buffer, 0, sizeof(acast_buffer));
-    acast = (acast_t*) acast_buffer;
-    acast->seqno = 0;
-    acast->num_frames = 0;
-    acast_clear_param(&acast->param);
-    
     if ((hip = hip_decode_init()) == NULL) {
 	perror("hip_decode_init");
 	exit(1);
@@ -258,13 +250,13 @@ int main(int argc, char** argv)
     fmt = SND_PCM_FORMAT_S16_LE;
     sent_frames = 0;
 
-    if ((s=acast_sender_open(multicast_addr,
-			     multicast_ifaddr,
-			     multicast_port,
-			     multicast_ttl,
-			     multicast_loop,
-			     &addr, &addrlen,
-			     network_bufsize)) < 0) {
+    if ((sock = acast_sender_open(multicast_addr,
+				  multicast_ifaddr,
+				  multicast_port,
+				  multicast_ttl,
+				  multicast_loop,
+				  &addr, &addrlen,
+				  network_bufsize)) < 0) {
 	fprintf(stderr, "unable to open multicast socket %s\n",
 		strerror(errno));
 	exit(1);
@@ -309,8 +301,8 @@ int main(int argc, char** argv)
 	    case 0:
 	    case 1:
 		imap_channels(mparam.format,
-			      channels, acast->param.channels_per_frame,
-			      acast->data, channel_map,
+			      channels, dst->param.channels_per_frame,
+			      dst->data, channel_map,
 			      frames_per_packet);
 		break;
 	    case 2:
@@ -333,7 +325,7 @@ int main(int argc, char** argv)
 	    }
 
 	    bytes_to_send = dst->num_frames*bytes_per_frame;
-	    if (sendto(s, acast_buffer, sizeof(acast_t)+bytes_to_send, 0,
+	    if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
 		       (struct sockaddr *) &addr, addrlen) < 0) {
 		fprintf(stderr, "failed to send frame %s\n",
 			strerror(errno));

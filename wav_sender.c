@@ -77,7 +77,7 @@ int main(int argc, char** argv)
     size_t bytes_per_frame;
     size_t bytes_to_send;
     uint32_t seqno = 0;
-    int s;
+    int sock;
     char* multicast_addr = MULTICAST_ADDR;
     char* multicast_ifaddr = MULTICAST_IFADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
@@ -219,13 +219,13 @@ int main(int argc, char** argv)
 	exit(1);
     }
     
-    if ((s=acast_sender_open(multicast_addr,
-			     multicast_ifaddr,
-			     multicast_port,
-			     multicast_ttl,
-			     multicast_loop,
-			     &addr, &addrlen,
-			     network_bufsize)) < 0) {
+    if ((sock = acast_sender_open(multicast_addr,
+				  multicast_ifaddr,
+				  multicast_port,
+				  multicast_ttl,
+				  multicast_loop,
+				  &addr, &addrlen,
+				  network_bufsize)) < 0) {
 	fprintf(stderr, "unable to open multicast socket %s\n",
 		strerror(errno));
 	exit(1);
@@ -310,7 +310,7 @@ int main(int argc, char** argv)
 	    acast_print(stderr, dst);
 	}
 	bytes_to_send = bytes_per_frame*dst->num_frames;
-	if (sendto(s, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
+	if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
 		   (struct sockaddr *) &addr, addrlen) < 0) {
 	    fprintf(stderr, "failed to send frame %s\n",
 		    strerror(errno));
