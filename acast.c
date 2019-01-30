@@ -100,9 +100,9 @@ void acast_print(FILE* f, acast_t* acast)
     int nsamples = 4;
     
     fprintf(f, "seqno: %u\n", acast->seqno);
-    fprintf(f, "num_frames: %u\n", acast->num_frames);    
+    fprintf(f, "  num_frames: %u\n", acast->num_frames);    
     acast_print_params(f, &acast->param);
-    fprintf(f, "[frame_time = %.2fms]\n",
+    fprintf(f, "  [frame_time = %.2fms]\n",
 	    1000*(1.0/acast->param.sample_rate)*acast->num_frames);
     // print first frame only (debugging)
 
@@ -453,7 +453,7 @@ static void op_u8(uint8_t* src,
 		  uint8_t* dst,
 		  unsigned int dst_channels_per_frame,
 		  acast_op_t* channel_op,
-		  unsigned int num_ops,		 
+		  size_t num_ops,		 
 		  uint32_t frames)
 {
     while(frames--) {
@@ -478,7 +478,7 @@ static void op_i16(int16_t* src,
 		   int16_t* dst,		     
 		   unsigned int dst_channels_per_frame,
 		   acast_op_t* channel_op,
-		   unsigned int num_ops,		 
+		   size_t num_ops,		 
 		   uint32_t frames)
 {
     while(frames--) {
@@ -516,7 +516,7 @@ static void op_i32(int32_t* src,
 		   int32_t* dst,		     
 		   unsigned int dst_channels_per_frame,
 		   acast_op_t* channel_op,
-		   unsigned int num_ops,		 
+		   size_t num_ops,		 
 		   uint32_t frames)
 {
     while(frames--) {
@@ -542,7 +542,7 @@ static void op_i32(int32_t* src,
 void op_channels(snd_pcm_format_t fmt,
 		 void* src, unsigned int src_channels_per_frame,
 		 void* dst, unsigned int dst_channels_per_frame,
-		 acast_op_t* channel_op, unsigned int num_ops,
+		 acast_op_t* channel_op, size_t num_ops,
 		 uint32_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
@@ -574,7 +574,7 @@ static void iop_u8(uint8_t** src,
 		   uint8_t* dst,
 		   unsigned int dst_channels_per_frame,
 		   acast_op_t* channel_op,
-		   unsigned int num_ops,		 
+		   size_t num_ops,		 
 		   uint32_t frames)
 {
     int j;
@@ -599,7 +599,7 @@ static void iop_i16(int16_t** src,
 		    int16_t* dst,		     
 		    unsigned int dst_channels_per_frame,
 		    acast_op_t* channel_op,
-		    unsigned int num_ops,		 
+		    size_t num_ops,		 
 		    uint32_t frames)
 {
     int j;
@@ -637,7 +637,7 @@ static void iop_i32(int32_t** src,
 		    int32_t* dst,		     
 		    unsigned int dst_channels_per_frame,
 		    acast_op_t* channel_op,
-		    unsigned int num_ops,		 
+		    size_t num_ops,		 
 		    uint32_t frames)
 {
     int j;
@@ -664,7 +664,7 @@ static void iop_i32(int32_t** src,
 void iop_channels(snd_pcm_format_t fmt,
 		  void** src, unsigned int src_channels_per_frame,  
 		  void* dst, unsigned int dst_channels_per_frame,
-		  acast_op_t* channel_op, unsigned int num_ops,
+		  acast_op_t* channel_op, size_t num_ops,
 		  uint32_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
@@ -752,4 +752,78 @@ void print_channel_ops(acast_op_t* channel_op, size_t num_ops)
 	}
     }
     printf("\n");
+}
+
+// try build a simple channel map from channel_op if possible
+// return 0 if not possible
+// return 1 if simple id channel_map channel_map[i] = i
+// return 2 if channel_map channel_map[i] = j where i != j for some i,j
+//
+int build_channel_map(acast_op_t* channel_op, size_t num_channel_ops,
+		      uint8_t* channel_map, size_t max_channel_map,
+		      int num_src_channels, int* num_dst_channels)
+{
+    int i;
+    int max_dst_channel = -1;
+    int use_channel_map = 1;
+    int id_channel_map = 1;
+	
+    for (i = 0; (i < num_channel_ops) && (i < max_channel_map); i++) {
+	if (channel_op[i].dst > max_dst_channel)
+	    max_dst_channel = channel_op[i].dst;
+	if ((channel_op[i].dst != i) ||
+	    (channel_op[i].op != ACAST_OP_SRC1)) {
+	    use_channel_map = 0;
+	    id_channel_map = 0;
+	}
+	else if (use_channel_map) {
+	    channel_map[i] = channel_op[i].src1;
+	    if (channel_map[i] != i)
+		id_channel_map = 0;
+	}
+    }
+    if (i >= max_channel_map)
+	use_channel_map = 0;
+	
+    if (*num_dst_channels == 0)
+	*num_dst_channels = max_dst_channel+1;
+    
+    if (*num_dst_channels != num_src_channels)
+	id_channel_map = 0;
+
+    if (use_channel_map && id_channel_map)
+	return 1;
+    else if (use_channel_map)
+	return 2;
+    return 0;
+}
+
+
+int parse_channel_map(char* map,
+		      acast_op_t* channel_op, size_t max_channel_ops,
+		      size_t* num_channel_ops,
+		      uint8_t* channel_map, size_t max_channel_map,
+		      int num_src_channels, int* num_dst_channels)
+{
+    size_t nc;
+    
+    if (strcmp(map, "auto") == 0) {
+	int i;
+	nc = (*num_dst_channels == 0) ? num_src_channels : *num_dst_channels;
+	if (nc > max_channel_ops) nc = max_channel_ops;
+	for (i = 0; i < nc; i++) {
+	    channel_op[i].op = ACAST_OP_SRC1;
+	    channel_op[i].src1 = i % num_src_channels;
+	    channel_op[i].src2 = 0;
+	    channel_op[i].dst = i;
+	}
+    }
+    else {
+	if ((nc = parse_channel_ops(map, channel_op, max_channel_ops)) < 0)
+	    return -1;
+    }
+    *num_channel_ops = nc;
+    return build_channel_map(channel_op, nc,
+			     channel_map, max_channel_map,
+			     num_src_channels, num_dst_channels);
 }

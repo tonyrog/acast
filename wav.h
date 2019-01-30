@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+#define ALSA_PCM_NEW_HW_PARAMS_API
+#include <alsa/asoundlib.h>
+
 /* AIFF Definitions */
 
 #define IFF_ID_FORM ((uint32_t)0x464f524d) /* "FORM" */
@@ -54,4 +57,77 @@ static inline snd_pcm_uframes_t wav_get_frames_per_buffer(wav_header_t* hdr,
     return buffer_size / wav_get_bytes_per_frame(hdr);
 }
 
+static inline void swap(uint8_t* ptr1, uint8_t* ptr2)
+{
+    uint8_t t = *ptr1;
+    *ptr1 = *ptr2;
+    *ptr2 = t;
+}
+
+static inline void swap16(void* data)
+{
+    swap((uint8_t*)data, (uint8_t*)data+1);
+}
+
+static inline void swap32(void* data)
+{
+    swap((uint8_t*)data, (uint8_t*)data+3);
+    swap((uint8_t*)data+1, (uint8_t*)data+2);
+}
+
+
+static inline void little16(void* data)
+{
+#if __BYTE_ORDER == __BIG_ENDIAN
+    swap16(data);
+#endif
+}
+
+static inline void little32(void* data)
+{
+#if __BYTE_ORDER == __BIG_ENDIAN
+    swap32(data);
+#endif
+}
+
+static inline uint32_t read_u32le(int fd)
+{
+    uint32_t x;
+    if (read(fd, &x, 4) == 4) {
+	little32((uint8_t*)&x);
+	return x;
+    }
+    return 0;
+}
+
+static inline void print_tag(FILE* f, uint32_t tag)
+{
+    fprintf(f, "%c%c%c%c",
+	    (tag>>24)&0xff,
+	    (tag>>16)&0xff,
+	    (tag>>8)&0xff,
+	    (tag&0xff));
+}
+
+static inline int read_tag(int fd, uint32_t* tag)
+{
+    int n;
+    if ((n = read(fd, tag, 4)) == 4) {
+	swap32((uint8_t*)tag);
+    }
+    return n;
+}
+
+extern snd_pcm_format_t wav_to_snd(uint16_t format, int bits_per_channel);
+
+extern int wav_decode_init(int fd, wav_header_t* hdr, xwav_header_t* xhdr,
+			   uint32_t* num_frames);
+
+extern int wav_decode(int fd, uint8_t* buf, wav_header_t* hdr,
+		      snd_pcm_uframes_t frames_per_packet);
+
+extern void wav_print(FILE* f, wav_header_t* ptr);
+extern void xwav_print(FILE* f, xwav_header_t* ptr);
+
+					       
 #endif

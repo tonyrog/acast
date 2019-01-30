@@ -82,14 +82,14 @@ extern void map_channels(snd_pcm_format_t fmt,
 extern void op_channels(snd_pcm_format_t fmt,
 			void* src, unsigned int src_channels_per_frame,
 			void* dst, unsigned int dst_channels_per_frame,
-			acast_op_t* channel_op, unsigned int num_ops,
+			acast_op_t* channel_op, size_t num_ops,
 			uint32_t frames);
 
 extern void iop_channels(snd_pcm_format_t fmt,
 			 void** src,
 			 unsigned int src_channels_per_frame,
 			 void* dst, unsigned int dst_channels_per_frame,
-			 acast_op_t* channel_op, unsigned int num_ops,
+			 acast_op_t* channel_op, size_t num_ops,
 			 uint32_t frames);
 
 // interleave channel data found in src using channel_map
@@ -111,8 +111,17 @@ extern int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 				   struct sockaddr_in* addr, socklen_t* addrlen,
 				   size_t bufsize);
 
-
-extern int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops);
 extern void print_channel_ops(acast_op_t* channel_op, size_t num_ops);
 
+extern int build_channel_map(acast_op_t* channel_op, size_t num_channel_ops,
+			     uint8_t* channel_map, size_t max_channel_map,
+			     int num_src_channels, int* num_dst_channels);
+
+extern int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops);
+
+extern int parse_channel_map(char* map,
+			     acast_op_t* channel_op, size_t max_channel_ops,
+			     size_t* num_channel_ops,
+			     uint8_t* channel_map, size_t max_channel_map,
+			     int num_src_channels, int* num_dst_channels);
 #endif

@@ -308,11 +308,10 @@ int main(int argc, char** argv)
     acast_op_t channel_op[MAX_CHANNEL_OP];
     uint8_t    channel_map[MAX_CHANNEL_MAP];    
     int        num_channel_ops;
-    int        use_channel_map = 0;  // prefer simple map if possible
-    int        id_channel_map = 0;   // one to one map
     char       silence_buffer[BYTES_PER_PACKET];
     acast_t*   silence;    
     int mode = 0; // SND_PCM_NONBLOCK;
+    int map_type;
     
     while(1) {
 	int option_index = 0;
@@ -414,44 +413,18 @@ int main(int argc, char** argv)
 	    exit(1);
 	}
     }
-    
-    { // try build a simple channel_map
-	int i;
-	int max_dst_channel = -1;
 
-	use_channel_map = 1;
-	id_channel_map = 1;
-	
-	for (i = 0; (i < num_channel_ops) && (i < MAX_CHANNEL_MAP); i++) {
-	    if (channel_op[i].dst > max_dst_channel)
-		max_dst_channel = channel_op[i].dst;
-	    if ((channel_op[i].dst != i) ||
-		(channel_op[i].op != ACAST_OP_SRC1)) {
-		use_channel_map = 0;
-		id_channel_map = 0;
-	    }
-	    else if (use_channel_map) {
-		channel_map[i] = channel_op[i].src1;
-		if (channel_map[i] != i)
-		    id_channel_map = 0;
-	    }
-	}
-	if (i >= MAX_CHANNEL_MAP)
-	    use_channel_map = 0;
-	
-	if (num_output_channels == 0)
-	    num_output_channels = max_dst_channel+1;
-	if (num_output_channels != mp3.stereo)
-	    id_channel_map = 0;
-    }
+    map_type = build_channel_map(channel_op, MAX_CHANNEL_MAP,
+				 channel_map, MAX_CHANNEL_MAP,
+				 mp3.stereo, &num_output_channels);
 
     if (verbose) {
 	printf("Channel map: ");
 	print_channel_ops(channel_op, num_channel_ops);
-	printf("use_channel_map: %d\n", use_channel_map);
-	printf("id_channel_map: %d\n", id_channel_map);
+	printf("use_channel_map: %d\n", (map_type > 0));
+	printf("id_channel_map: %d\n",  (map_type == 1));
 	printf("num_output_channels = %d\n", num_output_channels);
-    }
+    }    
 
     if (verbose > 1) {
 	mp3_print(&mp3);
@@ -526,18 +499,21 @@ int main(int argc, char** argv)
 	    channels[0] = (void*) lptr;
 	    channels[1] = (void*) rptr;
 
-	    if (use_channel_map) {
+	    switch(map_type) {
+	    case 0:
+	    case 1:
 		interleave_channels(sparam.format,
 				    channels, sparam.channels_per_frame,
 				    dst->data, channel_map,
 				    frames_per_packet);
-	    }
-	    else {
+		break;
+	    case 2:
 		iop_channels(sparam.format,
 			     channels, 2,
 			     dst->data, num_output_channels,
 			     channel_op, num_channel_ops,
 			     frames_per_packet);
+		break;
 	    }
 
 	    lptr += frames_per_packet;

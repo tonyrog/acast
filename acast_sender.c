@@ -15,20 +15,29 @@
 #include <arpa/inet.h>
 
 #include "acast.h"
+#include "tick.h"
 
 #define CAPTURE_DEVICE "default"
 #define NUM_CHANNELS  6
-#define CHANNEL_MAP   "012345"
+
+#define CHANNEL_MAP   "auto"
+#define MAX_CHANNEL_OP  16
+#define MAX_CHANNEL_MAP 8
 
 // ttl=0 local host, ttl=1 local network
-#define MULTICAST_TTL 1
+#define MULTICAST_TTL  1
 #define MULTICAST_LOOP 0
+
+#define min(a,b) (((a)<(b)) ? (a) : (b))
+#define max(a,b) (((a)>(b)) ? (a) : (b))
+
 
 void help(void)
 {
 printf("usage: acast_sender [options]\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
+"  -D, --debug     debug verbosity\n"    
 "  -a, --addr      multicast address (%s)\n"
 "  -i, --iface     multicast interface address (%s)\n"
 "  -p, --port      multicast address port (%d)\n"
@@ -48,32 +57,45 @@ printf("usage: acast_sender [options]\n"
 }
 
 int verbose = 0;
+int debug = 0;
 
 int main(int argc, char** argv)
 {
     char* capture_device_name = CAPTURE_DEVICE;
     snd_pcm_t *handle;
     acast_params_t iparam;
-    acast_params_t oparam;
+    acast_params_t sparam;
+    acast_params_t mparam;    
     uint32_t seqno = 0;
+    snd_pcm_uframes_t snd_frames_per_packet = 0;
+    snd_pcm_uframes_t mcast_frames_per_packet = 0;        
     snd_pcm_uframes_t frames_per_packet = 0;
+    size_t mcast_bytes_per_frame;
+    size_t bytes_per_frame;
     int err;
     int sock;
-    char acast_buffer[BYTES_PER_PACKET];
-    acast_t* acast;
+    char src_buffer[BYTES_PER_PACKET];
+    acast_t* src;
     char* multicast_addr = MULTICAST_ADDR;
     char* multicast_ifaddr = MULTICAST_IFADDR; // interface address
     uint16_t multicast_port = MULTICAST_PORT;    
     int multicast_loop = MULTICAST_LOOP;       // loopback multicast packets
     int multicast_ttl  = MULTICAST_TTL;
-    int num_output_channels = NUM_CHANNELS;
-    uint8_t channel_map[8] = {0,1,0,1,0,0,0,0};    
+    int num_output_channels = 0;
+    char* map = CHANNEL_MAP;
+    acast_op_t channel_op[MAX_CHANNEL_OP];
+    uint8_t    channel_map[MAX_CHANNEL_MAP];
+    size_t     num_channel_ops;    
     struct sockaddr_in addr;
     socklen_t addrlen;
-    size_t bytes_per_frame;
+    size_t bytes_to_send;    
     size_t network_bufsize = 2*BYTES_PER_PACKET;
+    tick_t     last_time;
+    tick_t     first_time = 0;
+    uint64_t   sent_frames = 0;
     int mode = 0; // SND_PCM_NONBLOCK;
-
+    int map_type;
+    
     while(1) {
 	int option_index = 0;
 	int c;
@@ -91,7 +113,7 @@ int main(int argc, char** argv)
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhva:i:p:t:d:",
+	c = getopt_long(argc, argv, "lhvDa:i:p:t:d:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -102,6 +124,10 @@ int main(int argc, char** argv)
 	    break;
 	case 'v':
 	    verbose++;
+	    break;
+	case 'D':
+	    verbose++;
+	    debug = 1;
 	    break;	    
 	case 'l':
 	    multicast_loop = 1;
@@ -128,41 +154,71 @@ int main(int argc, char** argv)
 	case 'c':
 	    num_output_channels = atoi(optarg);
 	    break;
-	case 'm': {
-	    char* ptr = optarg;
-	    int i = 0;
-	    while((i < 8) && isdigit(*ptr)) {
-		channel_map[i++] = (*ptr-'0');
-	    }
+	case 'm':
+	    map = strdup(optarg);
 	    break;
-	}
 	default:
 	    help();
 	    exit(1);
 	}
     }
 
+    time_tick_init();    
+
     if ((err = snd_pcm_open(&handle, capture_device_name,
 			    SND_PCM_STREAM_CAPTURE, mode)) < 0) {
 	fprintf(stderr, "snd_pcm_open failed %s\n", snd_strerror(err));
 	exit(1);
     }
+    
     acast_clear_param(&iparam);
-
     // setup wanted paramters
     iparam.format = SND_PCM_FORMAT_S16_LE;
     iparam.sample_rate = 22000;
     iparam.channels_per_frame = 6;
-    acast_setup_param(handle, &iparam, &oparam, &frames_per_packet);
-    bytes_per_frame = oparam.bytes_per_channel * oparam.channels_per_frame;
+    acast_setup_param(handle, &iparam, &sparam, &snd_frames_per_packet);
+    bytes_per_frame = sparam.bytes_per_channel * sparam.channels_per_frame;
 
+    if ((map_type = parse_channel_map(map,
+				      channel_op, MAX_CHANNEL_OP,
+				      &num_channel_ops,
+				      channel_map, MAX_CHANNEL_MAP,
+				      sparam.channels_per_frame,
+				      &num_output_channels)) < 0) {
+	fprintf(stderr, "map synatx error\n");
+	exit(1);
+    }
+
+    if (verbose) {
+	printf("Channel map: ");
+	print_channel_ops(channel_op, num_channel_ops);
+	printf("use_channel_map: %d\n", (map_type>0));
+	printf("id_channel_map: %d\n",  (map_type==1));
+	printf("num_output_channels = %d\n", num_output_channels);
+    }
+
+    mparam = sparam;
+    mparam.channels_per_frame = num_output_channels;
+    mcast_frames_per_packet = acast_get_frames_per_packet(&mparam);
+
+    if (verbose) {
+	fprintf(stderr, "mcast params:\n");
+	acast_print_params(stderr, &mparam);
+	fprintf(stderr, "  mcast_bytes_per_frame=%ld\n",
+		mcast_bytes_per_frame);
+	fprintf(stderr, "  mcast_frames_per_packet=%ld\n",
+		mcast_frames_per_packet);
+	fprintf(stderr, "----------------\n");
+    }
+    
+    
     // fill in "constant" values in the acast header
-    acast = (acast_t*) acast_buffer;
-    acast->seqno       = seqno;
-    acast->num_frames  = 0;
-    acast->param       = oparam;
+    src = (acast_t*) src_buffer;
+    src->seqno       = seqno;
+    src->num_frames  = 0;
+    src->param       = sparam;
 
-    acast_print(stderr, acast);
+    acast_print(stderr, src);
 
     if ((sock = acast_sender_open(multicast_addr,
 				  multicast_ifaddr,
@@ -175,12 +231,17 @@ int main(int argc, char** argv)
 		strerror(errno));
 	exit(1);
     }
+
+    frames_per_packet = min(mcast_frames_per_packet,snd_frames_per_packet);
+    bytes_per_frame = num_output_channels * mparam.bytes_per_channel;
+
+    last_time = time_tick_now();
     
     while(1) {
 	int r;
 
 	if ((r = acast_record(handle, bytes_per_frame,
-			      acast->data, frames_per_packet)) < 0) {
+			      src->data, frames_per_packet)) < 0) {
 	    fprintf(stderr, "acast_read failed: %s\n", snd_strerror(r));
 	    exit(1);
 	}
@@ -188,16 +249,64 @@ int main(int argc, char** argv)
 	    fprintf(stderr, "acast_read read zero bytes\n");
 	}
 	else {
-	    size_t nbytes = r * bytes_per_frame;
+	    char dst_buffer[BYTES_PER_PACKET];
+	    acast_t* dst;
 	    
 	    if (r < frames_per_packet)
-		fprintf(stderr, "acast_read read shortro bytes\n");
-	    acast->seqno = seqno++;
-	    acast->num_frames = r;
-	    if (acast->seqno % 100 == 0)
-		acast_print(stderr, acast);
-	    sendto(sock, acast_buffer, sizeof(acast_t)+nbytes, 0,
-		   (struct sockaddr *) &addr, addrlen);
+		fprintf(stderr, "acast_read read short bytes\n");
+	    
+	    switch(map_type) {
+	    case 1:
+		dst = (acast_t*) dst_buffer;
+		dst->param = mparam;
+		map_channels(mparam.format,
+			     src->data, sparam.channels_per_frame,
+			     dst->data, num_output_channels, 
+			     channel_map,
+			     frames_per_packet);
+		break;
+	    case 2:
+		dst = (acast_t*) dst_buffer;
+		dst->param = mparam;
+		op_channels(mparam.format,
+			    src->data, sparam.channels_per_frame,
+			    dst->data, num_output_channels,
+			    channel_op, num_channel_ops,
+			    frames_per_packet);
+		break;
+	    case 0:
+	    default:
+		dst = src;
+		dst->param = mparam;
+		break;
+	    }
+	    dst->seqno = seqno++;
+	    dst->num_frames = r;
+	    bytes_to_send = bytes_per_frame*dst->num_frames;
+	    if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
+		       (struct sockaddr *) &addr, addrlen) < 0) {
+		fprintf(stderr, "failed to send frame %s\n",
+			strerror(errno));
+	    }
+	    else {
+		sent_frames++;
+		if ((sent_frames & 0xff) == 0) {		    
+		    if (verbose > 1) {
+			fprintf(stderr, "SEND RATE = %ldHz, %.2fMb/s\n",
+				(1000000*sent_frames*frames_per_packet)/
+				(last_time-first_time),
+				((1000000*sent_frames*8*BYTES_PER_PACKET)/
+				 (double)(last_time-first_time)) /
+				(double)(1024*1024));
+		    }
+		    if (verbose > 3)
+			acast_print(stderr, dst);
+		}
+		if (sent_frames == 1) {
+		    first_time = last_time;
+		}
+		last_time = time_tick_now();
+	    }
 	}
     }
     exit(0);
