@@ -7,6 +7,7 @@
 #include <sched.h>
 
 #include "acast.h"
+#include "g711.h"
 
 int acast_sender_open(char* maddr, char* ifaddr, int mport,
 		      int ttl, int loop,
@@ -381,7 +382,7 @@ void map_channels(snd_pcm_format_t fmt,
     }
 }
 
-static void inter_8(uint8_t** src,
+static void imap_8(uint8_t** src,
 		   unsigned int dst_channels_per_frame,
 		   uint8_t* dst,
 		   uint8_t* channel_map,
@@ -394,11 +395,11 @@ static void inter_8(uint8_t** src,
 	    *dst++ = src[channel_map[i]][s];
 }
 
-static void inter_16(uint16_t** src,
-		     unsigned int dst_channels_per_frame,
-		     uint16_t* dst,
-		     uint8_t* channel_map,
-		     uint32_t frames)
+static void imap_16(uint16_t** src,
+		    unsigned int dst_channels_per_frame,
+		    uint16_t* dst,
+		    uint8_t* channel_map,
+		    uint32_t frames)
 {
     int s, i;
 
@@ -407,11 +408,11 @@ static void inter_16(uint16_t** src,
 	    *dst++ = src[channel_map[i]][s];
 }
 
-static void inter_32(uint32_t** src,
-		     unsigned int dst_channels_per_frame,
-		     uint32_t* dst,
-		     uint8_t* channel_map,
-		     uint32_t frames)
+static void imap_32(uint32_t** src,
+		    unsigned int dst_channels_per_frame,
+		    uint32_t* dst,
+		    uint8_t* channel_map,
+		    uint32_t frames)
 {
     int s, i;
 
@@ -421,7 +422,7 @@ static void inter_32(uint32_t** src,
 }
 
 // interleave channels using channel map
-void interleave_channels(snd_pcm_format_t fmt,
+void imap_channels(snd_pcm_format_t fmt,
 			 void** src,
 			 unsigned int dst_channels_per_frame,
 			 void* dst,
@@ -430,23 +431,62 @@ void interleave_channels(snd_pcm_format_t fmt,
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
-	inter_8((uint8_t**) src,
+	imap_8((uint8_t**) src,
 		dst_channels_per_frame,
 		dst, channel_map, frames);
 	break;
     case 16:
-	inter_16((uint16_t**) src,
+	imap_16((uint16_t**) src,
 		 dst_channels_per_frame,
 		 (uint16_t*)dst, channel_map, frames);
 	break;
     case 32:
-	inter_32((uint32_t**) src,
-		 dst_channels_per_frame,
-		 (uint32_t*)dst, channel_map, frames);
+	imap_32((uint32_t**) src,
+		dst_channels_per_frame,
+		(uint32_t*)dst, channel_map, frames);
 	break;
     }
 }
 
+// fixme: ulaw/alaw
+static inline int16_t sum_u8(uint8_t a, uint8_t b)
+{
+    uint16_t sum = a+b;
+    if (sum > 0xff) return 0xff;
+    return sum;
+}
+
+static inline int16_t sum_i16(int16_t a, int16_t b)
+{
+    int32_t sum = a+b;
+    if (sum > 32767) return 32767;
+    else if (sum < -32768) return -32768;
+    return sum;
+}
+
+static inline int16_t diff_i16(int16_t a, int16_t b)
+{
+    int32_t sum = a-b;
+    if (sum > 0x7fff) return 0x7fff;
+    else if (sum < -0x8000) return -0x8000;
+    return sum;
+}
+
+static inline int32_t sum_i32(int32_t a, int32_t b)
+{
+    int64_t sum = a+b;
+    if (sum > 0x7fffffff) return 0x7fffffff;
+    else if (sum < -0x80000000) return -0x80000000;
+    return sum;
+}
+
+static inline int32_t diff_i32(int32_t a, int32_t b)
+{
+    int64_t diff = a-b;
+    if (diff > 0x7fffffff) return 0x7fffffff;
+    else if (diff < -0x80000000) return -0x80000000;
+    return diff;
+}
 
 static void op_u8(uint8_t* src,
 		  unsigned int src_channels_per_frame,
@@ -489,20 +529,12 @@ static void op_i16(int16_t* src,
 	    switch(channel_op[i].op) {
 	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
 	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
-	    case ACAST_OP_ADD: {
-		int32_t sum = src1+src2;
-		if (sum > 32767) sum = 32767;
-		else if (sum < -32768) sum = -32768;
-		dst[channel_op[i].dst] = sum;
+	    case ACAST_OP_ADD:
+		dst[channel_op[i].dst] = sum_i16(src1,src2);
 		break;
-	    }
-	    case ACAST_OP_SUB: {
-		int32_t sum = src1-src2;
-		if (sum > 32767) sum = 32767;
-		else if (sum < -32768) sum = -32768;
-		dst[channel_op[i].dst] = sum;
+	    case ACAST_OP_SUB:
+		dst[channel_op[i].dst] = diff_i16(src1,src2);
 		break;
-	    }
 	    }
 	}
 	dst += dst_channels_per_frame;
@@ -631,7 +663,6 @@ static void iop_i16(int16_t** src,
     }
 }
 
-
 static void iop_i32(int32_t** src,
 		    unsigned int src_channels_per_frame,
 		    int32_t* dst,		     
@@ -657,10 +688,8 @@ static void iop_i32(int32_t** src,
     }
 }
 
-
-// rearrange interleaved channels with operation
-// select input channel src1, src2 and put result in output channel dst
-//
+// operate on separate channels in src and result in interleaved channels
+// in dst.
 void iop_channels(snd_pcm_format_t fmt,
 		  void** src, unsigned int src_channels_per_frame,  
 		  void* dst, unsigned int dst_channels_per_frame,

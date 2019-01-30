@@ -85,6 +85,14 @@ extern void op_channels(snd_pcm_format_t fmt,
 			acast_op_t* channel_op, size_t num_ops,
 			uint32_t frames);
 
+// source channels are separate result is interleaved
+extern void imap_channels(snd_pcm_format_t fmt,
+			  void** src,
+			  unsigned int dst_channels_per_frame,
+			  void* dst,
+			  uint8_t* channel_map,
+			  uint32_t frames);
+
 extern void iop_channels(snd_pcm_format_t fmt,
 			 void** src,
 			 unsigned int src_channels_per_frame,
@@ -92,15 +100,7 @@ extern void iop_channels(snd_pcm_format_t fmt,
 			 acast_op_t* channel_op, size_t num_ops,
 			 uint32_t frames);
 
-// interleave channel data found in src using channel_map
-// channel_map size must be >= dst_channels_per_frame
 
-extern void interleave_channels(snd_pcm_format_t fmt,
-				void** src,
-				unsigned int dst_channels_per_frame,
-				void* dst,
-				uint8_t* channel_map,
-				uint32_t frames);
 
 extern int acast_sender_open(char* maddr, char* ifaddr, int mport,
 				 int ttl, int loop,
