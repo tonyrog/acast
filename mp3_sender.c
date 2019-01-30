@@ -24,7 +24,7 @@
 // ttl=0 local host, ttl=1 local network
 #define MULTICAST_TTL  1
 #define MULTICAST_LOOP 0
-#define NUM_CHANNELS   2
+#define NUM_CHANNELS   0
 
 #define CHANNEL_MAP   "auto"
 #define MAX_CHANNEL_OP  16
@@ -105,7 +105,7 @@ int main(int argc, char** argv)
     char* map = CHANNEL_MAP;
     acast_op_t channel_op[MAX_CHANNEL_OP];
     uint8_t    channel_map[MAX_CHANNEL_MAP];
-    int        num_channel_ops;    
+    size_t num_channel_ops;    
     size_t bytes_per_frame;
     size_t bytes_to_send;    
     size_t network_bufsize = 4*BYTES_PER_PACKET;
@@ -209,30 +209,15 @@ int main(int argc, char** argv)
 	exit(1);
     }
 
-    if (strcmp(map, "auto") == 0) {
-	int i, n;
-
-	n = (num_output_channels == 0) ? mp3.stereo : num_output_channels;
-	for (i = 0; i < n; i++) {
-	    channel_op[i].op = ACAST_OP_SRC1;
-	    channel_op[i].src1 = i % mp3.stereo;
-	    channel_op[i].src2 = 0;
-	    channel_op[i].dst = i;
-	}
-	num_channel_ops = n;
+    if ((map_type = parse_channel_map(map,
+				      channel_op, MAX_CHANNEL_OP,
+				      &num_channel_ops,
+				      channel_map, MAX_CHANNEL_MAP,
+				      mp3.stereo,&num_output_channels))<0) {
+	fprintf(stderr, "map synatx error\n");
+	exit(1);
     }
-    else {
-	if ((num_channel_ops = parse_channel_ops(map, channel_op,
-						 MAX_CHANNEL_OP)) < 0) {
-	    fprintf(stderr, "map synatx error\n");
-	    exit(1);
-	}
-    }
-
-    map_type = build_channel_map(channel_op, MAX_CHANNEL_MAP,
-				 channel_map, MAX_CHANNEL_MAP,
-				 mp3.stereo, &num_output_channels);
-
+    
     if (verbose) {
 	printf("Channel map: ");
 	print_channel_ops(channel_op, num_channel_ops);

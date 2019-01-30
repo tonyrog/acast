@@ -733,7 +733,7 @@ int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops)
 	    channel_op[i].src2 = ptr[2]-'0';
 	    channel_op[i].dst  = i;
 	    channel_op[i].op   = ACAST_OP_ADD;
-	    ptr += 3;	    
+	    ptr += 3;
 	    break;
 	case '-':
 	    if (!isdigit(ptr[1]) || !isdigit(ptr[2]))

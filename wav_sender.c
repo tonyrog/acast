@@ -27,7 +27,7 @@
 // ttl=0 local host, ttl=1 local network
 #define MULTICAST_TTL  1
 #define MULTICAST_LOOP 0
-#define NUM_CHANNELS   2
+#define NUM_CHANNELS   0
 
 #define CHANNEL_MAP   "auto"
 #define MAX_CHANNEL_OP  16
@@ -90,7 +90,7 @@ int main(int argc, char** argv)
     xwav_header_t xwav;
     int fd, n, ret;
     uint32_t num_frames;
-    int num_output_channels = 0;
+    int num_output_channels = NUM_CHANNELS;
     char* map = CHANNEL_MAP;
     acast_op_t channel_op[MAX_CHANNEL_OP];
     uint8_t    channel_map[MAX_CHANNEL_MAP];
