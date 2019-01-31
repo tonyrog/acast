@@ -199,6 +199,8 @@ int main(int argc, char** argv)
 
     mparam = sparam;
     mparam.channels_per_frame = num_output_channels;
+    mcast_bytes_per_frame =
+	mparam.bytes_per_channel*mparam.channels_per_frame;    
     mcast_frames_per_packet = acast_get_frames_per_packet(&mparam);
 
     if (verbose) {
