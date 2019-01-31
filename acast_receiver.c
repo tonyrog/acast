@@ -16,8 +16,14 @@
 #include "acast.h"
 
 #define PLAYBACK_DEVICE "default"
-#define NUM_CHANNELS  2
-#define CHANNEL_MAP   "01"
+
+#define NUM_CHANNELS  0
+
+#define CHANNEL_MAP   "auto"
+#define MAX_CHANNEL_OP  16
+#define MAX_CHANNEL_MAP 8
+
+#define SRC_CHANNELS 6  // max number of channels supported
 
 void help(void)
 {
@@ -54,34 +60,38 @@ int main(int argc, char** argv)
     uint16_t multicast_port = MULTICAST_PORT;
     struct sockaddr_in addr;
     socklen_t addrlen;
-    uint8_t acast_buffer[BYTES_PER_PACKET];
     uint8_t silence_buffer[BYTES_PER_PACKET];
-    uint8_t snd_buffer[BYTES_PER_PACKET];
-    acast_t* acast;
     acast_t* silence;
     uint32_t last_seqno = 0;
     acast_params_t iparam;
-    acast_params_t oparam;
+    acast_params_t sparam;
     acast_params_t lparam;
     snd_pcm_uframes_t frames_per_packet;
     uint32_t drop = 0;
     uint32_t seen_packet = 0;
-    int num_output_channels = NUM_CHANNELS;    
-    uint8_t  channel_map[8] = {0,1,0,1,0,0,0,0};
+    int num_output_channels = NUM_CHANNELS;
+    char* map = CHANNEL_MAP;
+    acast_op_t channel_op[MAX_CHANNEL_OP];
+    uint8_t    channel_map[MAX_CHANNEL_MAP];
+    size_t num_channel_ops;
     size_t bytes_per_frame;
     size_t network_bufsize = 4*BYTES_PER_PACKET;
     int mode = SND_PCM_NONBLOCK;
-
+    int map_type;
+    
     while(1) {
 	int option_index = 0;
 	int c;
 	static struct option long_options[] = {
-	    {"help",   no_argument, 0,       'h'},
-	    {"verbose",no_argument, 0,       'v'},
-	    {"addr",   required_argument, 0, 'a'},
-	    {"iface",  required_argument, 0, 'i'},
-	    {"port",   required_argument, 0, 'p'},
-	    {"device", required_argument, 0, 'd'},
+	    {"help",   no_argument, 0,        'h'},
+	    {"verbose",no_argument, 0,        'v'},
+	    {"debug",  no_argument, 0,        'D'},		
+	    {"addr",   required_argument, 0,  'a'},
+	    {"iface",  required_argument, 0,  'i'},
+	    {"port",   required_argument, 0,  'p'},
+	    {"device", required_argument, 0,  'd'},
+	    {"channels",required_argument, 0, 'c'},		
+	    {"map",     required_argument, 0, 'm'},		
 	    {0,        0,                 0, 0}
 	};
 	
@@ -97,6 +107,10 @@ int main(int argc, char** argv)
 	case 'v':
 	    verbose++;
 	    break;
+	case 'D':
+	    verbose++;
+	    debug = 1;
+            break;
 	case 'd':
 	    playback_device_name = strdup(optarg);
 	    break;
@@ -113,6 +127,15 @@ int main(int argc, char** argv)
 		exit(1);
 	    }
 	    break;
+	case 'c':
+	    num_output_channels = atoi(optarg);
+	    break;
+	case 'm':
+	    map = strdup(optarg);
+	    break;
+	default:
+	    help();
+	    exit(1);	    
 	}
     }
 
@@ -122,15 +145,31 @@ int main(int argc, char** argv)
 	exit(1);
     }
 
+    if ((map_type = parse_channel_map(map,
+				      channel_op, MAX_CHANNEL_OP,
+				      &num_channel_ops,
+				      channel_map, MAX_CHANNEL_MAP,
+				      SRC_CHANNELS,&num_output_channels))<0) {
+	fprintf(stderr, "map synatx error\n");
+	exit(1);
+    }
+    if (verbose) {
+	printf("Channel map: ");
+	print_channel_ops(channel_op, num_channel_ops);
+	printf("use_channel_map: %d\n", (map_type > 0));
+	printf("id_channel_map: %d\n",  (map_type == 1));
+	printf("num_output_channels = %d\n", num_output_channels);
+    }
+    
     acast_clear_param(&iparam);
     // setup output parameters for sound card
     iparam.format = SND_PCM_FORMAT_S16_LE;
     iparam.sample_rate = 44100;
     iparam.channels_per_frame = num_output_channels;
-    acast_setup_param(handle, &iparam, &oparam, &frames_per_packet);
-    bytes_per_frame = oparam.bytes_per_channel*oparam.channels_per_frame;
-    acast_print_params(stderr, &oparam);
-    lparam = oparam;
+    acast_setup_param(handle, &iparam, &sparam, &frames_per_packet);
+    bytes_per_frame = sparam.bytes_per_channel*sparam.channels_per_frame;
+    acast_print_params(stderr, &sparam);
+    lparam = sparam;
 
     if ((sock=acast_receiver_open(multicast_addr,
 				  multicast_ifaddr,
@@ -142,10 +181,9 @@ int main(int argc, char** argv)
 	exit(1);
     }
 
-    acast = (acast_t*) acast_buffer;
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = frames_per_packet;
-    snd_pcm_format_set_silence(oparam.format, silence->data,
+    snd_pcm_format_set_silence(sparam.format, silence->data,
 			       frames_per_packet*bytes_per_frame);
     
     while(1) {
@@ -156,7 +194,13 @@ int main(int argc, char** argv)
 	fds.events = POLLIN;
 
 	if ((r = poll(&fds, 1, 1000)) == 1) {
-	    r = recvfrom(sock, acast_buffer, sizeof(acast_buffer), 0, 
+	    acast_t* src;
+	    uint8_t src_buffer[BYTES_PER_PACKET];
+	    acast_t* dst;
+	    uint8_t dst_buffer[BYTES_PER_PACKET*SRC_CHANNELS];
+
+	    src = (acast_t*) src_buffer;
+	    r = recvfrom(sock, src_buffer, sizeof(src_buffer), 0, 
 			 (struct sockaddr *) &addr, &addrlen);
 	    if (r < 0) {
 		perror("recvfrom");
@@ -164,31 +208,33 @@ int main(int argc, char** argv)
 	    }
 	    if (r == 0)
 		continue;
-#ifdef DEBUG
-	    if ((r - sizeof(acast_t)) !=
-		acast->param.bytes_per_channel *
-		acast->param.channels_per_frame*acast->num_frames) {
-		fprintf(stderr, "param data mismatch r=%d\n", r);
-		acast_print(stderr, acast);
+
+	    if (debug) {
+		if ((r - sizeof(acast_t)) !=
+		    src->param.bytes_per_channel *
+		    src->param.channels_per_frame*src->num_frames) {
+		    fprintf(stderr, "param data mismatch r=%d\n", r);
+		    acast_print(stderr, src);
+		}
 	    }
-#endif
-	    if (memcmp(&acast->param, &lparam, sizeof(acast_params_t)) != 0) {
+
+	    if (memcmp(&src->param, &lparam, sizeof(acast_params_t)) != 0) {
 		fprintf(stderr, "new parameters\n");
-		acast_print(stderr, acast);
+		acast_print(stderr, src);
 
 		snd_pcm_reset(handle);
 		snd_pcm_prepare(handle);
 
-		lparam = acast->param;
+		lparam = src->param;
 		iparam = lparam;
 		iparam.channels_per_frame = num_output_channels;
 
-		acast_setup_param(handle, &iparam, &oparam, &frames_per_packet);
+		acast_setup_param(handle, &iparam, &sparam, &frames_per_packet);
 
-		bytes_per_frame = oparam.bytes_per_channel*
-		    oparam.channels_per_frame;
+		bytes_per_frame = sparam.bytes_per_channel*
+		    sparam.channels_per_frame;
 		silence->num_frames = frames_per_packet;
-		snd_pcm_format_set_silence(oparam.format,
+		snd_pcm_format_set_silence(sparam.format,
 					   silence->data,
 					   frames_per_packet*bytes_per_frame);
 		acast_play(handle,bytes_per_frame,
@@ -197,13 +243,40 @@ int main(int argc, char** argv)
 			   silence->data,silence->num_frames);
 		snd_pcm_start(handle);
 	    }
-	    // rearrange data by select channels wanted
-	    map_channels(oparam.format,
-			 acast->data, acast->param.channels_per_frame,
-			 snd_buffer, oparam.channels_per_frame,
-			 channel_map,
-			 acast->num_frames);
 
+	    switch(map_type) {
+	    case 1:
+		dst = (acast_t*) dst_buffer;
+		dst->param = sparam;
+		map_channels(sparam.format,
+			     src->data, src->param.channels_per_frame,
+			     dst->data, num_output_channels, 
+			     channel_map,
+			     frames_per_packet);
+		break;
+	    case 2:
+		dst = (acast_t*) dst_buffer;
+		dst->param = sparam;
+		op_channels(sparam.format,
+			    src->data, src->param.channels_per_frame,
+			    dst->data, num_output_channels,
+			    channel_op, num_channel_ops,
+			    frames_per_packet);
+		break;
+	    case 0:
+	    default:
+		dst = src;
+		dst->param = sparam;
+		break;
+	    }
+
+	    dst->seqno = src->seqno;
+	    dst->num_frames = src->num_frames;
+
+	    if ((verbose > 3) && (dst->seqno % 100 == 0)) {
+		acast_print(stderr, dst);
+	    }
+	    
 	    if (!seen_packet) {
 		acast_play(handle,bytes_per_frame,
 			    silence->data,silence->num_frames);
@@ -212,7 +285,7 @@ int main(int argc, char** argv)
 		snd_pcm_start(handle);
 	    }
 
-	    if ((len=acast_play(handle,bytes_per_frame,snd_buffer,acast->num_frames)) < 0) {
+	    if ((len=acast_play(handle, bytes_per_frame, dst->data, dst->num_frames)) < 0) {
 		err = len;
 		fprintf(stderr, "snd_pcm_writei %s\n", snd_strerror(err));
 		snd_pcm_reset(handle);
@@ -220,18 +293,18 @@ int main(int argc, char** argv)
 		seen_packet = 0;
 		continue;
 	    }
-	    if (len < acast->num_frames) {
+	    if (len < dst->num_frames) {
 		fprintf(stderr, "short write %d\n", len);
 	    }
 
 	    if (verbose && seen_packet &&
-		((drop=(acast->seqno - last_seqno)) != 1))
+		((drop=(dst->seqno - last_seqno)) != 1))
 		fprintf(stderr, "dropped %u frames\n", drop);
-	    if ((verbose > 1) && (acast->seqno % 100) == 0) {
-		acast_print(stderr, acast);
+	    if ((verbose > 1) && (dst->seqno % 100) == 0) {
+		acast_print(stderr, dst);
 	    }
 	    seen_packet = 1;
-	    last_seqno = acast->seqno;
+	    last_seqno = dst->seqno;
 	}
     }
     exit(0);

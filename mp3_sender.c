@@ -120,15 +120,15 @@ int main(int argc, char** argv)
 	int option_index = 0;
 	int c;
 	static struct option long_options[] = {
-	    {"help",   no_argument, 0,       'h'},
-	    {"verbose",no_argument, 0,       'v'},
-	    {"debug",  no_argument, 0,       'D'},
-	    {"addr",   required_argument, 0, 'a'},
-	    {"iface",  required_argument, 0, 'i'},
-	    {"port",   required_argument, 0, 'p'},
-	    {"ttl",    required_argument, 0, 't'},
-	    {"loop",   no_argument, 0,       'l'},
-	    {"device", required_argument, 0, 'd'},
+	    {"help",   no_argument, 0,        'h'},
+	    {"verbose",no_argument, 0,        'v'},
+	    {"debug",  no_argument, 0,        'D'},
+	    {"addr",   required_argument, 0,  'a'},
+	    {"iface",  required_argument, 0,  'i'},
+	    {"port",   required_argument, 0,  'p'},
+	    {"ttl",    required_argument, 0,  't'},
+	    {"loop",   no_argument, 0,        'l'},
+	    {"device", required_argument, 0,  'd'},
 	    {"channels",required_argument, 0, 'c'},
 	    {"map",     required_argument, 0, 'm'},	    
 	    {0,        0,                 0, 0}
@@ -177,7 +177,7 @@ int main(int argc, char** argv)
 	    break;
 	default:
 	    help();
-	    exit(1);	    
+	    exit(1);
 	}
     }
     

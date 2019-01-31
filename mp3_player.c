@@ -56,7 +56,7 @@ void emit_debug(const char* format, va_list ap)
 
 void help(void)
 {
-printf("usage: mp3_sender [options] file\n"
+printf("usage: mp3_player [options] file\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
 "  -D, --debug     debug verbosity\n"

@@ -837,7 +837,7 @@ int parse_channel_map(char* map,
 		      uint8_t* channel_map, size_t max_channel_map,
 		      int num_src_channels, int* num_dst_channels)
 {
-    size_t nc;
+    int nc;
     
     if (strcmp(map, "auto") == 0) {
 	int i;

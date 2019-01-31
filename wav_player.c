@@ -168,9 +168,14 @@ int main(int argc, char** argv)
 	}
     }
 
-    map_type = build_channel_map(channel_op, MAX_CHANNEL_MAP,
-				 channel_map, MAX_CHANNEL_MAP,
-				 wav.NumChannels, &num_output_channels);
+    if ((map_type = build_channel_map(channel_op, MAX_CHANNEL_MAP,
+				      channel_map, MAX_CHANNEL_MAP,
+				      wav.NumChannels,
+				      &num_output_channels)) < 0) {
+	fprintf(stderr, "map synatx error\n");
+	exit(1);
+    }	
+	
     if (verbose) {
 	printf("Channel map: ");
 	print_channel_ops(channel_op, num_channel_ops);
