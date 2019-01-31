@@ -252,6 +252,8 @@ int acast_setup_param(snd_pcm_t *handle,
     snd_pcm_uframes_t periodsize;
     unsigned int uval;
     snd_pcm_uframes_t ufval;
+
+    snd_pcm_drop(handle);
     
     snd_pcm_hw_params_alloca(&params);
     snd_pcm_sw_params_alloca(&sparams);
