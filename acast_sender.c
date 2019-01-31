@@ -233,6 +233,14 @@ int main(int argc, char** argv)
 		strerror(errno));
 	exit(1);
     }
+    if (verbose) {
+	fprintf(stderr, "multicast to %s:%d\n",
+		multicast_addr, multicast_port);
+	fprintf(stderr, "send from interface %s ttl=%d loop=%d\n",
+		multicast_ifaddr, multicast_ttl,  multicast_loop);
+	fprintf(stderr, "send to addr=%s, len=%d\n",
+		inet_ntoa(addr.sin_addr), addrlen);
+    }
 
     frames_per_packet = min(mcast_frames_per_packet,snd_frames_per_packet);
     bytes_per_frame = num_output_channels * mparam.bytes_per_channel;

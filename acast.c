@@ -16,19 +16,42 @@ int acast_sender_open(char* maddr, char* ifaddr, int mport,
 {
     int sock;
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
-	uint32_t laddr = inet_addr(ifaddr);
+	struct in_addr laddr;
 	int val;
-	bzero((char *)addr, sizeof(*addr));
-	addr->sin_family = AF_INET;
-	addr->sin_addr.s_addr = inet_addr(maddr);
-	addr->sin_port = htons(mport);
-	
-	setsockopt(sock,IPPROTO_IP,IP_MULTICAST_IF,(void*)&laddr,sizeof(laddr));
-	setsockopt(sock,IPPROTO_IP,IP_MULTICAST_TTL,(void*)&ttl,sizeof(ttl));
-	setsockopt(sock,IPPROTO_IP,IP_MULTICAST_LOOP,(void*)&loop,sizeof(loop));
-	val = bufsize;
-	setsockopt(sock,SOL_SOCKET,SO_SNDBUF, &val,sizeof(val));
 
+	if (!inet_aton(ifaddr, &laddr)) {
+	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
+	    return -1;
+	}
+
+	if (setsockopt(sock,IPPROTO_IP,IP_MULTICAST_IF,
+		       (void*)&laddr,sizeof(laddr)) < 0) {
+	    perror("setsockopt: IP_MULTICAST_IF");
+	}
+	    
+	if (setsockopt(sock,IPPROTO_IP,IP_MULTICAST_TTL,
+		       (void*)&ttl,sizeof(ttl)) < 0) {
+	    perror("setsockopt: IP_MULTICAST_TTL");
+	}
+	    
+	if (setsockopt(sock,IPPROTO_IP,IP_MULTICAST_LOOP,
+		       (void*)&loop,sizeof(loop)) < 0) {
+	    perror("setsockopt: IP_MULTICAST_LOOP");
+	}
+
+	memset((char *)addr, 0, sizeof(*addr));	
+	addr->sin_family = AF_INET;
+	if (!inet_aton(maddr, &addr->sin_addr)) {
+	    fprintf(stderr, "maddr syntax error [%s]\n", maddr);
+	    return -1;
+	}
+	addr->sin_port = htons(mport);
+
+	val = bufsize;
+	if (setsockopt(sock,SOL_SOCKET,SO_SNDBUF,
+		       (void*)&val,sizeof(val)) < 0) {
+	    perror("setsockopt: SO_SNDBUF");
+	}
 	*addrlen = sizeof(*addr);
     }
     return sock;
@@ -44,35 +67,55 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 	struct ip_mreq mreq;
 	int on = 1;
 	int val;
-	
-	bzero((char *)addr, sizeof(*addr));
-	addr->sin_family = AF_INET;
-	addr->sin_addr.s_addr = inet_addr(ifaddr);
-	addr->sin_port = htons(mport);
-	*addrlen = sizeof(*addr);
 
-	setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,(void*) &on, sizeof(on));
-#ifdef SO_REUSEPORT	
-	setsockopt(sock,SOL_SOCKET,SO_REUSEPORT,(void*) &on, sizeof(on));
+	if (setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,(void*)&on,sizeof(on))<0) {
+	    perror("setsockopt: REUSEADDR");
+	}
+#ifdef SO_REUSEPORT
+	if (setsockopt(sock,SOL_SOCKET,SO_REUSEPORT,(void*)&on,sizeof(on))<0){
+	    perror("setsockopt: REUSEPORT");
+	}
 #endif
 	val = (int) bufsize;
-	setsockopt(sock,SOL_SOCKET,SO_RCVBUF, &val, sizeof(val));
+	if (setsockopt(sock,SOL_SOCKET,SO_RCVBUF, &val, sizeof(val))<0) {
+	    perror("setsockopt: RCVBUF");
+	}	    
+
+	memset((char *)addr, 0, sizeof(*addr));
+	addr->sin_family = AF_INET;
+
+	if (!inet_aton(ifaddr, &addr->sin_addr)) {
+	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
+	    return -1;
+	}
+	addr->sin_port = htons(mport);
+	*addrlen = sizeof(*addr);
 	
-	mreq.imr_multiaddr.s_addr = inet_addr(maddr);
-	mreq.imr_interface.s_addr = inet_addr(ifaddr);
+	if (bind(sock, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+	    int err = errno;
+	    perror("bind");
+	    close(sock);
+	    errno = err;
+	    return -1;
+	}
+
+	if (!inet_aton(maddr, &mreq.imr_multiaddr)) {
+	    fprintf(stderr, "maddr syntax error [%s]\n", maddr);
+	    return -1;
+	}
+	if (!inet_aton(ifaddr, &mreq.imr_interface)) {
+	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
+	    return -1;
+	}
 	if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
 		       &mreq, sizeof(mreq)) < 0) {
 	    int err = errno;
+	    perror("setsockopt: IP_ADD_MEMBERSHIP");
 	    close(sock);
 	    errno = err;
 	    return -1;
 	}
-	if (bind(sock, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
-	    int err = errno;
-	    close(sock);
-	    errno = err;
-	    return -1;
-	}
+
     }
     return sock;
 }

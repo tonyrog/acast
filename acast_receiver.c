@@ -180,6 +180,13 @@ int main(int argc, char** argv)
 		strerror(errno));
 	exit(1);
     }
+    if (verbose) {
+	fprintf(stderr, "multicast from %s:%d on interface %s\n",
+		multicast_addr, multicast_port, multicast_ifaddr);
+	fprintf(stderr, "recv addr=%s, len=%d\n",
+		inet_ntoa(addr.sin_addr), addrlen);
+    }
+    
 
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = frames_per_packet;
@@ -219,9 +226,12 @@ int main(int argc, char** argv)
 	    }
 
 	    if (memcmp(&src->param, &lparam, sizeof(acast_params_t)) != 0) {
-		fprintf(stderr, "new parameters\n");
+		if (verbose)
+		    fprintf(stderr, "new parameters from %s:%d\n",
+			    inet_ntoa(addr.sin_addr),
+			    ntohs(addr.sin_port));
+		
 		acast_print(stderr, src);
-
 		snd_pcm_reset(handle);
 		snd_pcm_prepare(handle);
 
