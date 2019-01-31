@@ -56,7 +56,7 @@ printf("usage: wav_sender [options] file\n"
 "  -c, --channels  number of output channels (%d)\n"
 "  -m, --map       channel map (\"%s\")\n",       
        MULTICAST_ADDR,
-       MULTICAST_IFADDR,
+       INTERFACE_ADDR,
        MULTICAST_PORT,
        MULTICAST_LOOP,       
        MULTICAST_TTL,
@@ -79,7 +79,7 @@ int main(int argc, char** argv)
     uint32_t seqno = 0;
     int sock;
     char* multicast_addr = MULTICAST_ADDR;
-    char* multicast_ifaddr = MULTICAST_IFADDR;    // interface address
+    char* multicast_ifaddr = INTERFACE_ADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
     int multicast_loop = MULTICAST_LOOP;   // loopback multicast packets
     int multicast_ttl  = MULTICAST_TTL;

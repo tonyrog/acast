@@ -47,7 +47,7 @@ printf("usage: acast_sender [options]\n"
 "  -c, --channels  number of output channels (%d)\n"
 "  -m, --map       channel map (%s)\n",
        MULTICAST_ADDR,
-       MULTICAST_IFADDR,
+       INTERFACE_ADDR,
        MULTICAST_PORT,
        MULTICAST_LOOP,       
        MULTICAST_TTL,
@@ -77,10 +77,11 @@ int main(int argc, char** argv)
     char src_buffer[BYTES_PER_PACKET];
     acast_t* src;
     char* multicast_addr = MULTICAST_ADDR;
-    char* multicast_ifaddr = MULTICAST_IFADDR; // interface address
     uint16_t multicast_port = MULTICAST_PORT;    
     int multicast_loop = MULTICAST_LOOP;       // loopback multicast packets
     int multicast_ttl  = MULTICAST_TTL;
+    char* interface_addr = INTERFACE_ADDR; // interface address
+    char* unicast_addr   = NULL;
     int num_output_channels = 0;
     char* map = CHANNEL_MAP;
     acast_op_t channel_op[MAX_CHANNEL_OP];
@@ -138,11 +139,14 @@ int main(int argc, char** argv)
 	case 'd':
 	    capture_device_name = strdup(optarg);
 	    break;
+	case 's':
+	    unicast_addr = strdup(optarg);
+	    break;	    
 	case 'a':
 	    multicast_addr = strdup(optarg);
 	    break;
 	case 'i':
-	    multicast_ifaddr = strdup(optarg);
+	    interface_addr = strdup(optarg);
 	    break;
 	case 'p':
 	    multicast_port = atoi(optarg);
@@ -222,22 +226,33 @@ int main(int argc, char** argv)
 
     acast_print(stderr, src);
 
-    if ((sock = acast_sender_open(multicast_addr,
-				  multicast_ifaddr,
-				  multicast_port,
-				  multicast_ttl,
-				  multicast_loop,
-				  &addr, &addrlen,
-				  network_bufsize)) < 0) {
-	fprintf(stderr, "unable to open multicast socket %s\n",
-		strerror(errno));
-	exit(1);
+    if (unicast_addr != NULL) {
+	if ((sock = acast_usender_open(unicast_addr, interface_addr, 0,
+				       &addr, &addrlen,
+				       network_bufsize)) < 0) {
+	    fprintf(stderr, "unable to open unicast socket %s\n",
+		    strerror(errno));
+	    exit(1);
+	}
+    }
+    else {
+	if ((sock = acast_sender_open(multicast_addr,
+				      interface_addr,
+				      multicast_port,
+				      multicast_ttl,
+				      multicast_loop,
+				      &addr, &addrlen,
+				      network_bufsize)) < 0) {
+	    fprintf(stderr, "unable to open multicast socket %s\n",
+		    strerror(errno));
+	    exit(1);
+	}
     }
     if (verbose) {
 	fprintf(stderr, "multicast to %s:%d\n",
 		multicast_addr, multicast_port);
 	fprintf(stderr, "send from interface %s ttl=%d loop=%d\n",
-		multicast_ifaddr, multicast_ttl,  multicast_loop);
+		interface_addr, multicast_ttl,  multicast_loop);
 	fprintf(stderr, "send to addr=%s, len=%d\n",
 		inet_ntoa(addr.sin_addr), addrlen);
     }

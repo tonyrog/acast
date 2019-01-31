@@ -16,9 +16,9 @@
 #include <alsa/asoundlib.h>
 
 // default values
-#define MULTICAST_ADDR    "224.0.0.2"
-#define MULTICAST_IFADDR  "0.0.0.0"
-#define MULTICAST_PORT    22402
+#define MULTICAST_ADDR  "224.0.0.2"
+#define MULTICAST_PORT  22402
+#define INTERFACE_ADDR  "0.0.0.0"
 
 #define BYTES_PER_PACKET 1472     // try avoid ip fragmentation
 
@@ -110,6 +110,10 @@ extern int acast_sender_open(char* maddr, char* ifaddr, int mport,
 extern int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 				   struct sockaddr_in* addr, socklen_t* addrlen,
 				   size_t bufsize);
+
+extern int acast_usender_open(char* uaddr, char* ifaddr, int port,
+			      struct sockaddr_in* addr, socklen_t* addrlen,
+			      size_t bufsize);
 
 extern void print_channel_ops(acast_op_t* channel_op, size_t num_ops);
 

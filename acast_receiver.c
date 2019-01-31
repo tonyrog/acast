@@ -38,7 +38,7 @@ printf("usage: mp3_sender [options] file\n"
 "  -c, --channels  number of output channels (%d)\n"
 "  -m, --map       channel map (%s)\n",       
        MULTICAST_ADDR,
-       MULTICAST_IFADDR,
+       INTERFACE_ADDR,
        MULTICAST_PORT,
        PLAYBACK_DEVICE,
        NUM_CHANNELS,
@@ -56,7 +56,7 @@ int main(int argc, char** argv)
     int sock;
     int len;
     char* multicast_addr = MULTICAST_ADDR;
-    char* multicast_ifaddr = MULTICAST_IFADDR;    // interface address
+    char* multicast_ifaddr = INTERFACE_ADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
     struct sockaddr_in addr;
     socklen_t addrlen;
