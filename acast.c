@@ -9,6 +9,8 @@
 #include "acast.h"
 #include "g711.h"
 
+#define DEBUG
+
 int acast_sender_open(char* maddr, char* ifaddr, int mport,
 		      int ttl, int loop,
 		      struct sockaddr_in* addr, socklen_t* addrlen,
@@ -18,7 +20,8 @@ int acast_sender_open(char* maddr, char* ifaddr, int mport,
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
 	struct in_addr laddr;
 	int val;
-
+	socklen_t len;
+	
 	if (!inet_aton(ifaddr, &laddr)) {
 	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
 	    return -1;
@@ -52,6 +55,14 @@ int acast_sender_open(char* maddr, char* ifaddr, int mport,
 		       (void*)&val,sizeof(val)) < 0) {
 	    perror("setsockopt: SO_SNDBUF");
 	}
+#ifdef DEBUG
+	len = sizeof(val);
+	if (getsockopt(sock,SOL_SOCKET,SO_SNDBUF,
+		       (void*)&val,&len) < 0) {
+	    perror("getsockopt: SO_SNDBUF");
+	}
+	fprintf(stderr, "SNDBUF = %d\n", val);
+#endif
 	*addrlen = sizeof(*addr);
     }
     return sock;
@@ -67,7 +78,8 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 	struct ip_mreq mreq;
 	int on = 1;
 	int val;
-
+	socklen_t len;
+	
 	if (setsockopt(sock,SOL_SOCKET,SO_REUSEADDR,(void*)&on,sizeof(on))<0) {
 	    perror("setsockopt: REUSEADDR");
 	}
@@ -79,7 +91,14 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 	val = (int) bufsize;
 	if (setsockopt(sock,SOL_SOCKET,SO_RCVBUF, &val, sizeof(val))<0) {
 	    perror("setsockopt: RCVBUF");
-	}	    
+	}
+#ifdef DEBUG
+	len = sizeof(val);	
+	if (getsockopt(sock,SOL_SOCKET,SO_RCVBUF,(void*)&val,&len) < 0) {
+	perror("getsockopt: SO_RCVBUF");
+	}
+	fprintf(stderr, "RCVBUF = %d\n", val);
+#endif	
 
 	memset((char *)addr, 0, sizeof(*addr));
 	addr->sin_family = AF_INET;
@@ -99,6 +118,8 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 	    return -1;
 	}
 
+	// FIXME add SO_BINDTODEVICE for multicast?
+
 	if (!inet_aton(maddr, &mreq.imr_multiaddr)) {
 	    fprintf(stderr, "maddr syntax error [%s]\n", maddr);
 	    return -1;
@@ -115,7 +136,6 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 	    errno = err;
 	    return -1;
 	}
-
     }
     return sock;
 }

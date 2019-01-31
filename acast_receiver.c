@@ -75,7 +75,7 @@ int main(int argc, char** argv)
     uint8_t    channel_map[MAX_CHANNEL_MAP];
     size_t num_channel_ops;
     size_t bytes_per_frame;
-    size_t network_bufsize = 4*BYTES_PER_PACKET;
+    size_t network_bufsize = BYTES_PER_PACKET;
     int mode = SND_PCM_NONBLOCK;
     int map_type;
     
