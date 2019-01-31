@@ -176,6 +176,9 @@ int main(int argc, char** argv)
 		fprintf(stderr, "new parameters\n");
 		acast_print(stderr, acast);
 
+		snd_pcm_reset(handle);
+		snd_pcm_prepare(handle);
+
 		lparam = acast->param;
 		iparam = lparam;
 		iparam.channels_per_frame = num_output_channels;
@@ -188,6 +191,11 @@ int main(int argc, char** argv)
 		snd_pcm_format_set_silence(oparam.format,
 					   silence->data,
 					   frames_per_packet*bytes_per_frame);
+		acast_play(handle,bytes_per_frame,
+			    silence->data,silence->num_frames);
+		acast_play(handle,bytes_per_frame,
+			   silence->data,silence->num_frames);
+		snd_pcm_start(handle);
 	    }
 	    // rearrange data by select channels wanted
 	    map_channels(oparam.format,

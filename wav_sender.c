@@ -27,7 +27,7 @@
 // ttl=0 local host, ttl=1 local network
 #define MULTICAST_TTL  1
 #define MULTICAST_LOOP 0
-#define NUM_CHANNELS   2
+#define NUM_CHANNELS   0
 
 #define CHANNEL_MAP   "auto"
 #define MAX_CHANNEL_OP  16
@@ -77,7 +77,7 @@ int main(int argc, char** argv)
     size_t bytes_per_frame;
     size_t bytes_to_send;
     uint32_t seqno = 0;
-    int s;
+    int sock;
     char* multicast_addr = MULTICAST_ADDR;
     char* multicast_ifaddr = MULTICAST_IFADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
@@ -90,7 +90,7 @@ int main(int argc, char** argv)
     xwav_header_t xwav;
     int fd, n, ret;
     uint32_t num_frames;
-    int num_output_channels = 0;
+    int num_output_channels = NUM_CHANNELS;
     char* map = CHANNEL_MAP;
     acast_op_t channel_op[MAX_CHANNEL_OP];
     uint8_t    channel_map[MAX_CHANNEL_MAP];
@@ -219,13 +219,13 @@ int main(int argc, char** argv)
 	exit(1);
     }
     
-    if ((s=acast_sender_open(multicast_addr,
-			     multicast_ifaddr,
-			     multicast_port,
-			     multicast_ttl,
-			     multicast_loop,
-			     &addr, &addrlen,
-			     network_bufsize)) < 0) {
+    if ((sock = acast_sender_open(multicast_addr,
+				  multicast_ifaddr,
+				  multicast_port,
+				  multicast_ttl,
+				  multicast_loop,
+				  &addr, &addrlen,
+				  network_bufsize)) < 0) {
 	fprintf(stderr, "unable to open multicast socket %s\n",
 		strerror(errno));
 	exit(1);
@@ -310,7 +310,7 @@ int main(int argc, char** argv)
 	    acast_print(stderr, dst);
 	}
 	bytes_to_send = bytes_per_frame*dst->num_frames;
-	if (sendto(s, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
+	if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
 		   (struct sockaddr *) &addr, addrlen) < 0) {
 	    fprintf(stderr, "failed to send frame %s\n",
 		    strerror(errno));
