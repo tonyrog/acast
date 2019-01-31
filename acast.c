@@ -186,8 +186,9 @@ int acast_setup_param(snd_pcm_t *handle,
     snd_pcm_uframes_t frames_per_packet;
     snd_pcm_uframes_t buffersize;
     snd_pcm_uframes_t periodsize;
-    snd_pcm_uframes_t val;
-
+    unsigned int uval;
+    snd_pcm_uframes_t ufval;
+    
     snd_pcm_hw_params_alloca(&params);
     snd_pcm_sw_params_alloca(&sparams);
 
@@ -209,14 +210,16 @@ int acast_setup_param(snd_pcm_t *handle,
 	SNDCALL(snd_pcm_hw_params_set_channels,
 		handle, params, in->channels_per_frame);
 
-    SNDCALL(snd_pcm_hw_params_get_channels,params,&out->channels_per_frame);
+    SNDCALL(snd_pcm_hw_params_get_channels,params,&uval);
+    out->channels_per_frame = uval;
     
     if (in->sample_rate) {
-	unsigned int val = in->sample_rate;
-	SNDCALL(snd_pcm_hw_params_set_rate_near, handle, params, &val, 0);
+	uval = in->sample_rate;
+	SNDCALL(snd_pcm_hw_params_set_rate_near, handle, params, &uval, 0);
     }
 
-    SNDCALL(snd_pcm_hw_params_get_rate, params, &out->sample_rate, 0);
+    SNDCALL(snd_pcm_hw_params_get_rate, params, &uval, 0);
+    out->sample_rate = uval;
     
     frames_per_packet = acast_get_frames_per_packet(out);
 
@@ -235,9 +238,9 @@ int acast_setup_param(snd_pcm_t *handle,
 
     SNDCALL(snd_pcm_sw_params_set_start_threshold,handle,sparams,0x7fffffff);
 
-    SNDCALL(snd_pcm_hw_params_get_period_size, params, &val, 0);
-    
-    SNDCALL(snd_pcm_sw_params_set_avail_min, handle, sparams, val);
+    SNDCALL(snd_pcm_hw_params_get_period_size, params, &ufval, 0);
+    SNDCALL(snd_pcm_sw_params_set_avail_min, handle, sparams, ufval);
+
     SNDCALL(snd_pcm_sw_params, handle, sparams);
 
     SNDCALL(snd_pcm_prepare, handle);

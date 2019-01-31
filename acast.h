@@ -24,11 +24,11 @@
 
 typedef struct _acast_params_t
 {
-    int32_t  format;   // snd_pcm_format_t (allow UNKNOWN =-1 to be passed)
-    uint32_t channels_per_frame;     // channels per frame
-    uint32_t bits_per_channel;       // bits per channel
-    uint32_t bytes_per_channel;      // bytes per channel
-    uint32_t sample_rate;            // sample rate    
+    int8_t   format;   // snd_pcm_format_t (allow UNKNOWN =-1 to be passed)
+    uint8_t  channels_per_frame;     // channels per frame
+    uint8_t  bits_per_channel;       // bits per channel
+    uint8_t  bytes_per_channel;      // bytes per channel
+    uint32_t sample_rate;            // sample rate
 } acast_params_t;
 
 typedef struct _acast_t
