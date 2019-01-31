@@ -84,13 +84,13 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
 	memset((char *)addr, 0, sizeof(*addr));
 	addr->sin_family = AF_INET;
 
-	if (!inet_aton(ifaddr, &addr->sin_addr)) {
+	if (!inet_aton("0.0.0.0", &addr->sin_addr)) {
 	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
 	    return -1;
 	}
 	addr->sin_port = htons(mport);
 	*addrlen = sizeof(*addr);
-	
+
 	if (bind(sock, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
 	    int err = errno;
 	    perror("bind");
