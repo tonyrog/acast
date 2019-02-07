@@ -168,7 +168,7 @@ int main(int argc, char** argv)
 	}
     }
 
-    if ((map_type = build_channel_map(channel_op, MAX_CHANNEL_MAP,
+    if ((map_type = build_channel_map(channel_op, num_channel_ops,
 				      channel_map, MAX_CHANNEL_MAP,
 				      wav.NumChannels,
 				      &num_output_channels)) < 0) {

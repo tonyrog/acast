@@ -140,39 +140,40 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
     return sock;
 }
 
-int acast_usender_open(char* maddr, char* ifaddr, int port,
+int acast_usender_open(char* uaddr, char* ifaddr, int port,
 		       struct sockaddr_in* addr, socklen_t* addrlen,
 		       size_t bufsize)
 {
     int sock;
+
+    memset((char *)addr, 0, sizeof(*addr));
+    addr->sin_family = AF_INET;
+    if (!inet_aton(uaddr, &addr->sin_addr)) {
+	fprintf(stderr, "address syntax error [%s]\n", uaddr);
+	return -1;
+    }
+    addr->sin_port = htons(port);
+    *addrlen = sizeof(*addr);
+
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
 	struct sockaddr_in baddr;
 	int val;
 	socklen_t len;
-	
+
+	memset(&baddr, 0, sizeof(baddr));
+	baddr.sin_family = AF_INET;
+	baddr.sin_port   = htons(0);
 	if (!inet_aton(ifaddr, &baddr.sin_addr)) {
 	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
 	    return -1;
 	}
-
-	memset((char *)addr, 0, sizeof(*addr));
-	addr->sin_family = AF_INET;
-
-	if (!inet_aton("0.0.0.0", &addr->sin_addr)) {
-	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
-	    return -1;
-	}
-	addr->sin_port = htons(port);
-	*addrlen = sizeof(*addr);
-
-	if (bind(sock, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+	if (bind(sock, (struct sockaddr *)&baddr, sizeof(baddr)) < 0) {
 	    int err = errno;
 	    perror("bind");
 	    close(sock);
 	    errno = err;
 	    return -1;
 	}
-	
 	val = bufsize;
 	if (setsockopt(sock,SOL_SOCKET,SO_SNDBUF,
 		       (void*)&val,sizeof(val)) < 0) {
@@ -186,7 +187,6 @@ int acast_usender_open(char* maddr, char* ifaddr, int port,
 	}
 	fprintf(stderr, "SNDBUF = %d\n", val);
 #endif
-	*addrlen = sizeof(*addr);
     }
     return sock;
 }

@@ -45,6 +45,7 @@ printf("usage: acast_sender [options]\n"
 "  -t, --ttl       multicast ttl (%d)\n"
 "  -d, --device    capture device (%s)\n"
 "  -c, --channels  number of output channels (%d)\n"
+"  -C, --ichannels  number of input channels (%d)\n"
 "  -m, --map       channel map (%s)\n",
        MULTICAST_ADDR,
        INTERFACE_ADDR,
@@ -53,6 +54,7 @@ printf("usage: acast_sender [options]\n"
        MULTICAST_TTL,
        CAPTURE_DEVICE,
        NUM_CHANNELS,
+       NUM_CHANNELS,       
        CHANNEL_MAP);
 }
 
@@ -83,6 +85,7 @@ int main(int argc, char** argv)
     char* interface_addr = INTERFACE_ADDR; // interface address
     char* unicast_addr   = NULL;
     int num_output_channels = 0;
+    int num_input_channels = 2;
     char* map = CHANNEL_MAP;
     acast_op_t channel_op[MAX_CHANNEL_OP];
     uint8_t    channel_map[MAX_CHANNEL_MAP];
@@ -110,11 +113,12 @@ int main(int argc, char** argv)
 	    {"loop",   no_argument, 0,       'l'},
 	    {"device", required_argument, 0, 'd'},
 	    {"channels",required_argument, 0, 'c'},
+	    {"ichannels",required_argument, 0, 'C'},	    
 	    {"map",     required_argument, 0, 'm'},
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhvDa:i:p:t:d:",
+	c = getopt_long(argc, argv, "lhvDa:s:i:p:t:d:c:C:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -158,6 +162,9 @@ int main(int argc, char** argv)
 	case 'c':
 	    num_output_channels = atoi(optarg);
 	    break;
+	case 'C':
+	    num_input_channels = atoi(optarg);
+	    break;	    
 	case 'm':
 	    map = strdup(optarg);
 	    break;
@@ -178,8 +185,8 @@ int main(int argc, char** argv)
     acast_clear_param(&iparam);
     // setup wanted paramters
     iparam.format = SND_PCM_FORMAT_S16_LE;
-    iparam.sample_rate = 22000;
-    iparam.channels_per_frame = 6;
+    iparam.sample_rate = 48000;
+    iparam.channels_per_frame = num_input_channels;
     acast_setup_param(handle, &iparam, &sparam, &snd_frames_per_packet);
     bytes_per_frame = sparam.bytes_per_channel * sparam.channels_per_frame;
 
