@@ -78,8 +78,6 @@ int main(int argc, char** argv)
     size_t network_bufsize = BYTES_PER_PACKET;
     int mode = SND_PCM_NONBLOCK;
     int map_type;
-    size_t flushed_packets = 0;
-    int flushing;
     
     while(1) {
 	int option_index = 0;
@@ -195,35 +193,6 @@ int main(int argc, char** argv)
     snd_pcm_format_set_silence(sparam.format, silence->data,
 			       frames_per_packet*sparam.channels_per_frame);
 
-    // flush network packets, can be plenty
-    flushing = 1;
-    flushed_packets = 0;
-    
-    while(flushing) {
-	int r;
-	struct pollfd fds;
-
-	fds.fd = sock;
-	fds.events = POLLIN;
-
-	if ((r = poll(&fds, 1, 100)) == 1) {
-	    int len;
-	    uint8_t src_buffer[BYTES_PER_PACKET];
-
-	    len = recvfrom(sock, src_buffer, sizeof(src_buffer), 0,
-			 (struct sockaddr *) &addr, &addrlen);
-	    if (len < 0) {
-		perror("recvfrom");
-		exit(1);
-	    }
-	    flushed_packets++;
-	}
-	else if (r == 0) {
-	    flushing = 0;
-	    if (verbose) 
-		fprintf(stderr, "flushed %ld packets\n", flushed_packets);
-	}
-    }
     
     while(1) {
 	int r;
@@ -276,15 +245,9 @@ int main(int argc, char** argv)
 		bytes_per_frame = sparam.bytes_per_channel*
 		    sparam.channels_per_frame;
 		silence->num_frames = frames_per_packet;
-		snd_pcm_format_set_silence(sparam.format,
-					   silence->data,
-					   frames_per_packet*
-					   sparam.channels_per_frame);
-		acast_play(handle,bytes_per_frame,
-			    silence->data,silence->num_frames);
-		acast_play(handle,bytes_per_frame,
-			   silence->data,silence->num_frames);
-		snd_pcm_start(handle);
+		snd_pcm_format_set_silence(sparam.format,silence->data,
+	                       frames_per_packet*sparam.channels_per_frame);
+		seen_packet = 0;
 	    }
 
 	    switch(map_type) {
