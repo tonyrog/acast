@@ -278,7 +278,8 @@ int main(int argc, char** argv)
 		silence->num_frames = frames_per_packet;
 		snd_pcm_format_set_silence(sparam.format,
 					   silence->data,
-					   frames_per_packet*bytes_per_frame);
+					   frames_per_packet*
+					   sparam.channels_per_frame);
 		acast_play(handle,bytes_per_frame,
 			    silence->data,silence->num_frames);
 		acast_play(handle,bytes_per_frame,

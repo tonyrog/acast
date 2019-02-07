@@ -269,6 +269,7 @@ int main(int argc, char** argv)
     bytes_per_frame = num_output_channels * mparam.bytes_per_channel;
 
     last_time = time_tick_now();
+    first_time = time_tick_now();
     
     while(1) {
 	int r;
@@ -323,20 +324,17 @@ int main(int argc, char** argv)
 	    }
 	    else {
 		sent_frames++;
-		if ((sent_frames & 0xff) == 0) {		    
+		if ((sent_frames & 0xff) == 0) {
 		    if (verbose > 1) {
-			fprintf(stderr, "SEND RATE = %ldHz, %.2fMb/s\n",
-				(1000000*sent_frames*frames_per_packet)/
-				(last_time-first_time),
+			fprintf(stderr, "SEND RATE = %.2fKHz, %.2fMb/s\n",
+				(1000*sent_frames*frames_per_packet)/
+				((double)(last_time-first_time)),
 				((1000000*sent_frames*8*BYTES_PER_PACKET)/
 				 (double)(last_time-first_time)) /
 				(double)(1024*1024));
 		    }
 		    if (verbose > 3)
 			acast_print(stderr, dst);
-		}
-		if (sent_frames == 1) {
-		    first_time = last_time;
 		}
 		last_time = time_tick_now();
 	    }
