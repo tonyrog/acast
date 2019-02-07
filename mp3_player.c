@@ -93,6 +93,7 @@ int main(int argc, char** argv)
     size_t snd_bytes_per_frame;    
     size_t bytes_per_frame;    
     uint32_t seqno = 0;
+    int play_started = 0;
     int err;
     hip_t hip;
     snd_pcm_format_t fmt;    
@@ -260,18 +261,13 @@ int main(int argc, char** argv)
 		snd_bytes_per_frame);
 	fprintf(stderr, "  snd_frames_per_packet:%ld\n",
 		snd_frames_per_packet);
-	fprintf(stderr, "----------------\n");
     }    
     
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = snd_frames_per_packet;
     snd_pcm_format_set_silence(sparam.format, silence->data,
-			       snd_frames_per_packet*snd_bytes_per_frame);
-    acast_play(handle, snd_bytes_per_frame,
-	       silence->data, silence->num_frames);
-    acast_play(handle, snd_bytes_per_frame,
-	       silence->data, silence->num_frames);
-    snd_pcm_start(handle);	
+			       snd_frames_per_packet*
+			       sparam.channels_per_frame);
     
     frames_per_packet = min(snd_frames_per_packet,mp3_frames_per_packet);
 
@@ -328,6 +324,14 @@ int main(int argc, char** argv)
 	    
 	    if ((verbose > 3) && (seqno % 100 == 0)) {
 		acast_print(stderr, dst);
+	    }
+	    if (!play_started) {
+	      acast_play(handle, snd_bytes_per_frame,
+			 silence->data, silence->num_frames);
+	      acast_play(handle, snd_bytes_per_frame,
+			 silence->data, silence->num_frames);
+	      snd_pcm_start(handle);
+	      play_started = 1;
 	    }
 	    acast_play(handle, bytes_per_frame, dst->data, dst->num_frames);
 	    num_frames -= frames_per_packet;

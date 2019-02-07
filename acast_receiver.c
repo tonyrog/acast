@@ -193,7 +193,7 @@ int main(int argc, char** argv)
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = frames_per_packet;
     snd_pcm_format_set_silence(sparam.format, silence->data,
-			       frames_per_packet*bytes_per_frame);
+			       frames_per_packet*sparam.channels_per_frame);
 
     // flush network packets, can be plenty
     flushing = 1;
