@@ -234,7 +234,8 @@ int main(int argc, char** argv)
     acast_print(stderr, src);
 
     if (unicast_addr != NULL) {
-	if ((sock = acast_usender_open(unicast_addr, interface_addr, 0,
+	if ((sock = acast_usender_open(unicast_addr, interface_addr,
+				       multicast_port, 
 				       &addr, &addrlen,
 				       network_bufsize)) < 0) {
 	    fprintf(stderr, "unable to open unicast socket %s\n",
@@ -260,8 +261,8 @@ int main(int argc, char** argv)
 		multicast_addr, multicast_port);
 	fprintf(stderr, "send from interface %s ttl=%d loop=%d\n",
 		interface_addr, multicast_ttl,  multicast_loop);
-	fprintf(stderr, "send to addr=%s, len=%d\n",
-		inet_ntoa(addr.sin_addr), addrlen);
+	fprintf(stderr, "send to addr=%s, port=%d, len=%d\n",
+		inet_ntoa(addr.sin_addr), ntohs(addr.sin_port), addrlen);
     }
 
     frames_per_packet = min(mcast_frames_per_packet,snd_frames_per_packet);
