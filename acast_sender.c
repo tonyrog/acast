@@ -24,9 +24,26 @@
 #define MAX_CHANNEL_OP  16
 #define MAX_CHANNEL_MAP 8
 
+#define MAX_CLIENTS     8
+
 // ttl=0 local host, ttl=1 local network
 #define MULTICAST_TTL  1
 #define MULTICAST_LOOP 0
+
+#define CLIENT_TIMEOUT 30000000  // 30s
+
+typedef struct
+{
+    struct sockaddr_in addr;
+    socklen_t          addrlen;
+    tick_t             tmo;        // next timeout
+    uint32_t           mask;       // channel mask
+    uint8_t            buffer[BYTES_PER_PACKET];
+} client_t;
+
+
+static int num_clients = 0;
+client_t client[MAX_CLIENTS];
 
 #define min(a,b) (((a)<(b)) ? (a) : (b))
 #define max(a,b) (((a)>(b)) ? (a) : (b))
@@ -38,9 +55,10 @@ printf("usage: acast_sender [options]\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
 "  -D, --debug     debug verbosity\n"    
-"  -a, --addr      multicast address (%s)\n"
+"  -a, --maddr     multicast address (%s)\n"
 "  -i, --iface     multicast interface address (%s)\n"
 "  -p, --port      multicast address port (%d)\n"
+"  -q, --ctrl      multicast control port (%d)\n"       
 "  -l, --loop      enable multi cast loop (%d)\n"
 "  -t, --ttl       multicast ttl (%d)\n"
 "  -d, --device    capture device (%s)\n"
@@ -49,6 +67,7 @@ printf("usage: acast_sender [options]\n"
        MULTICAST_ADDR,
        INTERFACE_ADDR,
        MULTICAST_PORT,
+       CONTROL_PORT,
        MULTICAST_LOOP,       
        MULTICAST_TTL,
        CAPTURE_DEVICE,
@@ -58,6 +77,30 @@ printf("usage: acast_sender [options]\n"
 
 int verbose = 0;
 int debug = 0;
+
+void client_add(actl_t* ctl, struct sockaddr_in* addr, socklen_t addrlen)
+{
+    int i;
+    for (i = 0; i < num_clients; i++) {
+	if (memcmp(&client[i].addr, &addr, addrlen) == 0) {
+	    client[i].tmo = time_tick_now() + CLIENT_TIMEOUT;
+	    return;
+	}
+    }
+    if (num_clients < MAX_CLIENTS) {
+	i = num_clients++;
+	client[i].addr = *addr;
+	client[i].addrlen = addrlen;
+	client[i].tmo = time_tick_now() + CLIENT_TIMEOUT;
+	client[i].mask = ctl->mask;
+	
+	if (verbose) {
+	    fprintf(stderr, "unicast client %s:%d added\n",
+		    inet_ntoa(addr->sin_addr),
+		    ntohs(addr->sin_port));
+	}
+    }
+}
 
 int main(int argc, char** argv)
 {
@@ -73,22 +116,24 @@ int main(int argc, char** argv)
     size_t mcast_bytes_per_frame;
     size_t bytes_per_frame;
     int err;
-    int sock;
-    char src_buffer[BYTES_PER_PACKET];
-    acast_t* src;
+    int sock, ctrl;
     char* multicast_addr = MULTICAST_ADDR;
-    uint16_t multicast_port = MULTICAST_PORT;    
+    uint16_t multicast_port = MULTICAST_PORT;
     int multicast_loop = MULTICAST_LOOP;       // loopback multicast packets
     int multicast_ttl  = MULTICAST_TTL;
     char* interface_addr = INTERFACE_ADDR; // interface address
-    char* unicast_addr   = NULL;
+    uint16_t control_port = CONTROL_PORT;
     int num_output_channels = 0;
     char* map = CHANNEL_MAP;
     acast_op_t channel_op[MAX_CHANNEL_OP];
     uint8_t    channel_map[MAX_CHANNEL_MAP];
     size_t     num_channel_ops;    
+    struct sockaddr_in maddr;
+    socklen_t maddrlen;
+    struct sockaddr_in iaddr;
+    socklen_t iaddrlen;
     struct sockaddr_in addr;
-    socklen_t addrlen;
+    socklen_t addrlen;        
     size_t bytes_to_send;    
     size_t network_bufsize = 2*BYTES_PER_PACKET;
     tick_t     last_time;
@@ -96,6 +141,9 @@ int main(int argc, char** argv)
     uint64_t   sent_frames = 0;
     int mode = 0; // SND_PCM_NONBLOCK;
     int map_type;
+    char src_buffer[BYTES_PER_PACKET];
+    acast_t* src;
+    
     
     while(1) {
 	int option_index = 0;
@@ -103,9 +151,10 @@ int main(int argc, char** argv)
 	static struct option long_options[] = {
 	    {"help",   no_argument, 0,       'h'},
 	    {"verbose",no_argument, 0,       'v'},
-	    {"addr",   required_argument, 0, 'a'},
+	    {"maddr",  required_argument, 0, 'a'},
 	    {"iface",  required_argument, 0, 'i'},
 	    {"port",   required_argument, 0, 'p'},
+	    {"ctrl",   required_argument, 0, 'q'},
 	    {"ttl",    required_argument, 0, 't'},
 	    {"loop",   no_argument, 0,       'l'},
 	    {"device", required_argument, 0, 'd'},
@@ -114,7 +163,7 @@ int main(int argc, char** argv)
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhvDa:i:p:t:d:",
+	c = getopt_long(argc, argv, "lhvDa:i:p:q:t:d:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -139,9 +188,6 @@ int main(int argc, char** argv)
 	case 'd':
 	    capture_device_name = strdup(optarg);
 	    break;
-	case 's':
-	    unicast_addr = strdup(optarg);
-	    break;	    
 	case 'a':
 	    multicast_addr = strdup(optarg);
 	    break;
@@ -155,6 +201,13 @@ int main(int argc, char** argv)
 		exit(1);
 	    }
 	    break;
+	case 'q':
+	    control_port = atoi(optarg);
+	    if ((control_port < 1) || (control_port > 65535)) {
+		fprintf(stderr, "control port out of range\n");
+		exit(1);
+	    }
+	    break;	    
 	case 'c':
 	    num_output_channels = atoi(optarg);
 	    break;
@@ -226,35 +279,42 @@ int main(int argc, char** argv)
 
     acast_print(stderr, src);
 
-    if (unicast_addr != NULL) {
-	if ((sock = acast_usender_open(unicast_addr, interface_addr, 0,
-				       &addr, &addrlen,
-				       network_bufsize)) < 0) {
-	    fprintf(stderr, "unable to open unicast socket %s\n",
-		    strerror(errno));
-	    exit(1);
-	}
+    if ((sock = acast_sender_open(multicast_addr,
+				  interface_addr,
+				  multicast_port,
+				  multicast_ttl,
+				  multicast_loop,
+				  &maddr, &maddrlen,
+				  network_bufsize)) < 0) {
+	fprintf(stderr, "unable to open multicast socket %s\n",
+		strerror(errno));
+	exit(1);
     }
-    else {
-	if ((sock = acast_sender_open(multicast_addr,
-				      interface_addr,
-				      multicast_port,
-				      multicast_ttl,
-				      multicast_loop,
-				      &addr, &addrlen,
-				      network_bufsize)) < 0) {
-	    fprintf(stderr, "unable to open multicast socket %s\n",
-		    strerror(errno));
-	    exit(1);
-	}
+
+    if ((ctrl = acast_receiver_open(multicast_addr,
+				    interface_addr,
+				    control_port,
+				    &iaddr, &iaddrlen,
+				    num_output_channels*network_bufsize)) < 0) {
+	fprintf(stderr, "unable to open multicast socket %s\n",
+		strerror(errno));
+	exit(1);
     }
+
     if (verbose) {
+        // Mulicast data output
 	fprintf(stderr, "multicast to %s:%d\n",
 		multicast_addr, multicast_port);
 	fprintf(stderr, "send from interface %s ttl=%d loop=%d\n",
 		interface_addr, multicast_ttl,  multicast_loop);
 	fprintf(stderr, "send to addr=%s, len=%d\n",
-		inet_ntoa(addr.sin_addr), addrlen);
+		inet_ntoa(maddr.sin_addr), maddrlen);
+	
+	// Control input
+	fprintf(stderr, "multicast from %s:%d on interface %s\n",
+		multicast_addr, control_port, interface_addr);
+	fprintf(stderr, "recv addr=%s, len=%d\n",
+		inet_ntoa(iaddr.sin_addr), iaddrlen);
     }
 
     frames_per_packet = min(mcast_frames_per_packet,snd_frames_per_packet);
@@ -264,7 +324,23 @@ int main(int argc, char** argv)
     
     while(1) {
 	int r;
+	struct pollfd fds;
 
+	fds.fd = ctrl;
+	fds.events = POLLIN;
+
+	if ((r = poll(&fds, 1, 0)) == 1) { // control input
+	    actl_t* ctl;
+	    uint8_t  ctl_buffer[BYTES_PER_PACKET];
+
+	    ctl = (actl_t*) ctl_buffer;
+	    r = recvfrom(sock, (void*) ctl, sizeof(ctl_buffer), 0,
+			 (struct sockaddr *) &addr, &addrlen);
+	    if (ctl->magic == CONTROL_MAGIC) {
+		client_add(ctl, &addr, addrlen);
+	    }
+	}
+	
 	if ((r = acast_record(handle, bytes_per_frame,
 			      src->data, frames_per_packet)) < 0) {
 	    fprintf(stderr, "acast_read failed: %s\n", snd_strerror(r));
@@ -309,7 +385,7 @@ int main(int argc, char** argv)
 	    dst->num_frames = r;
 	    bytes_to_send = bytes_per_frame*dst->num_frames;
 	    if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
-		       (struct sockaddr *) &addr, addrlen) < 0) {
+		       (struct sockaddr *) &maddr, maddrlen) < 0) {
 		fprintf(stderr, "failed to send frame %s\n",
 			strerror(errno));
 	    }

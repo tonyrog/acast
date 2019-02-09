@@ -27,7 +27,7 @@
 
 void help(void)
 {
-printf("usage: mp3_sender [options] file\n"
+printf("usage: acast_receiver [options] file\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
 "  -D, --debug     debug verbosity\n"              
@@ -47,6 +47,41 @@ printf("usage: mp3_sender [options] file\n"
 
 int verbose = 0;
 int debug = 0;
+
+void flush_packets(int sock)
+{
+    size_t flushed_packets = 0;
+    int flushing = 1;
+    
+    while(flushing) {
+	int r;
+	struct pollfd fds;
+
+	fds.fd = sock;
+	fds.events = POLLIN;
+
+	if ((r = poll(&fds, 1, 10)) == 1) {
+	    struct sockaddr_in addr;
+	    socklen_t addrlen;	
+	    int len;
+	    uint8_t src_buffer[BYTES_PER_PACKET];
+
+	    len = recvfrom(sock, src_buffer, sizeof(src_buffer), 0,
+			   (struct sockaddr *) &addr, &addrlen);
+	    if (len < 0) {
+		perror("recvfrom");
+		exit(1);
+	    }
+	    flushed_packets++;
+	}
+	else if (r == 0) {
+	    flushing = 0;
+	    if (verbose) 
+		fprintf(stderr, "flushed %ld packets\n", flushed_packets);
+	}
+    }
+}
+
 
 int main(int argc, char** argv)
 {
@@ -78,9 +113,7 @@ int main(int argc, char** argv)
     size_t network_bufsize = BYTES_PER_PACKET;
     int mode = SND_PCM_NONBLOCK;
     int map_type;
-    size_t flushed_packets = 0;
-    int flushing;
-    
+
     while(1) {
 	int option_index = 0;
 	int c;
@@ -195,35 +228,7 @@ int main(int argc, char** argv)
     snd_pcm_format_set_silence(sparam.format, silence->data,
 			       frames_per_packet*bytes_per_frame);
 
-    // flush network packets, can be plenty
-    flushing = 1;
-    flushed_packets = 0;
-    
-    while(flushing) {
-	int r;
-	struct pollfd fds;
-
-	fds.fd = sock;
-	fds.events = POLLIN;
-
-	if ((r = poll(&fds, 1, 100)) == 1) {
-	    int len;
-	    uint8_t src_buffer[BYTES_PER_PACKET];
-
-	    len = recvfrom(sock, src_buffer, sizeof(src_buffer), 0,
-			 (struct sockaddr *) &addr, &addrlen);
-	    if (len < 0) {
-		perror("recvfrom");
-		exit(1);
-	    }
-	    flushed_packets++;
-	}
-	else if (r == 0) {
-	    flushing = 0;
-	    if (verbose) 
-		fprintf(stderr, "flushed %ld packets\n", flushed_packets);
-	}
-    }
+    // flush_packets(sock);
     
     while(1) {
 	int r;

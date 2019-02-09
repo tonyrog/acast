@@ -140,39 +140,41 @@ int acast_receiver_open(char* maddr, char* ifaddr, int mport,
     return sock;
 }
 
-int acast_usender_open(char* maddr, char* ifaddr, int port,
+int acast_usender_open(char* uaddr, char* ifaddr, int port,
 		       struct sockaddr_in* addr, socklen_t* addrlen,
 		       size_t bufsize)
 {
     int sock;
+    struct sockaddr_in baddr;
+
+    memset((char *)addr, 0, sizeof(*addr));
+    addr->sin_family = AF_INET;    
+    if (!inet_aton(uaddr, &addr->sin_addr)) {
+	fprintf(stderr, "uaddr syntax error [%s]\n", uaddr);
+	return -1;
+    }
+    addr->sin_port = htons(port);
+    *addrlen = sizeof(*addr);
+
+    memset((char *)&baddr, 0, sizeof(baddr));
+    baddr.sin_family = AF_INET;
+    if (!inet_aton(ifaddr, &baddr.sin_addr)) {
+	fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
+	return -1;
+    }
+    baddr.sin_port = 0;
+    
     if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) >= 0) {
-	struct sockaddr_in baddr;
 	int val;
 	socklen_t len;
-	
-	if (!inet_aton(ifaddr, &baddr.sin_addr)) {
-	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
-	    return -1;
-	}
 
-	memset((char *)addr, 0, sizeof(*addr));
-	addr->sin_family = AF_INET;
-
-	if (!inet_aton("0.0.0.0", &addr->sin_addr)) {
-	    fprintf(stderr, "ifaddr syntax error [%s]\n", ifaddr);
-	    return -1;
-	}
-	addr->sin_port = htons(port);
-	*addrlen = sizeof(*addr);
-
-	if (bind(sock, (struct sockaddr *) addr, sizeof(*addr)) < 0) {
+	if (bind(sock, (struct sockaddr *) &baddr, sizeof(baddr)) < 0) {
 	    int err = errno;
 	    perror("bind");
 	    close(sock);
 	    errno = err;
 	    return -1;
 	}
-	
 	val = bufsize;
 	if (setsockopt(sock,SOL_SOCKET,SO_SNDBUF,
 		       (void*)&val,sizeof(val)) < 0) {
@@ -186,7 +188,6 @@ int acast_usender_open(char* maddr, char* ifaddr, int port,
 	}
 	fprintf(stderr, "SNDBUF = %d\n", val);
 #endif
-	*addrlen = sizeof(*addr);
     }
     return sock;
 }
@@ -575,11 +576,17 @@ static inline int16_t sum_u8(uint8_t a, uint8_t b)
     return sum;
 }
 
+static inline int16_t diff_u8(uint8_t a, uint8_t b)
+{
+    if (a > b) return 0;
+    return a-b;
+}
+
 static inline int16_t sum_i16(int16_t a, int16_t b)
 {
     int32_t sum = a+b;
-    if (sum > 32767) return 32767;
-    else if (sum < -32768) return -32768;
+    if (sum > 0x7fff) return 0x7fff;
+    else if (sum < -0x8000) return -0x8000;
     return sum;
 }
 
@@ -618,13 +625,20 @@ static void op_u8(uint8_t* src,
     while(frames--) {
 	int i;
 	for (i = 0;  i < num_ops; i++) {
-	    uint8_t src1 = src[channel_op[i].src1];
-	    uint8_t src2 = src[channel_op[i].src2];
 	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
-	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
-	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
-	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
+	    case ACAST_OP_SRC1:
+		dst[channel_op[i].dst] = src[channel_op[i].src1];
+		break;
+	    case ACAST_OP_CONST1:
+		dst[channel_op[i].dst] = channel_op[i].src1;
+		break;
+	    case ACAST_OP_ADD:
+		dst[channel_op[i].dst] =
+		    src[channel_op[i].src1] + src[channel_op[i].src2];
+		break;
+	    case ACAST_OP_SUB:
+		dst[channel_op[i].dst] =
+		    src[channel_op[i].src1] - src[channel_op[i].src2];
 	    }
 	}
 	dst += dst_channels_per_frame;	
@@ -643,16 +657,22 @@ static void op_i16(int16_t* src,
     while(frames--) {
 	int i;
 	for (i = 0;  i < num_ops; i++) {
-	    int16_t src1 = src[channel_op[i].src1];
-	    int16_t src2 = src[channel_op[i].src2];
 	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
-	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
+	    case ACAST_OP_SRC1:
+		dst[channel_op[i].dst] = src[channel_op[i].src1];
+		break;
+	    case ACAST_OP_CONST1:
+		dst[channel_op[i].dst] = channel_op[i].src1;
+		break;
 	    case ACAST_OP_ADD:
-		dst[channel_op[i].dst] = sum_i16(src1,src2);
+		dst[channel_op[i].dst] =
+		    sum_i16(src[channel_op[i].src1],
+			    src[channel_op[i].src2]);
 		break;
 	    case ACAST_OP_SUB:
-		dst[channel_op[i].dst] = diff_i16(src1,src2);
+		dst[channel_op[i].dst] =
+		    diff_i16(src[channel_op[i].src1],
+			     src[channel_op[i].src2]);
 		break;
 	    }
 	}
@@ -673,13 +693,22 @@ static void op_i32(int32_t* src,
     while(frames--) {
 	int i;
 	for (i = 0;  i < num_ops; i++) {
-	    int32_t src1 = src[channel_op[i].src1];
-	    int32_t src2 = src[channel_op[i].src2];
 	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
-	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
-	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
-	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
+	    case ACAST_OP_SRC1:
+		dst[channel_op[i].dst] = src[channel_op[i].src1];
+		break;
+	    case ACAST_OP_CONST1:
+		dst[channel_op[i].dst] = channel_op[i].src1;
+		break;
+	    case ACAST_OP_ADD:
+		dst[channel_op[i].dst] =
+		    sum_i32(src[channel_op[i].src1],
+			    src[channel_op[i].src2]);
+		break;
+	    case ACAST_OP_SUB:
+		dst[channel_op[i].dst] =
+		    diff_i32(src[channel_op[i].src1],
+			     src[channel_op[i].src2]);
 	    }
 	}
 	dst += dst_channels_per_frame;	
@@ -732,13 +761,23 @@ static void iop_u8(uint8_t** src,
     for (j = 0; j < frames; j++) {
 	int i;
 	for (i = 0;  i < num_ops; i++) {
-	    uint8_t src1 = src[channel_op[i].src1][j];
-	    uint8_t src2 = src[channel_op[i].src2][j];
 	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
-	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
-	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
-	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
+	    case ACAST_OP_SRC1:
+		dst[channel_op[i].dst] = src[channel_op[i].src1][j];
+		break;
+	    case ACAST_OP_CONST1:
+		dst[channel_op[i].dst] = channel_op[i].src1;
+		break;
+	    case ACAST_OP_ADD:
+		dst[channel_op[i].dst] =
+		    sum_u8(src[channel_op[i].src1][j],
+			   src[channel_op[i].src2][j]);
+		break;
+	    case ACAST_OP_SUB:
+		dst[channel_op[i].dst] =
+		    diff_u8(src[channel_op[i].src1][j],
+			    src[channel_op[i].src2][j]);
+		break;
 	    }
 	}
 	dst += dst_channels_per_frame;	
@@ -757,25 +796,22 @@ static void iop_i16(int16_t** src,
     for (j = 0; j < frames; j++) {    
 	int i;
 	for (i = 0;  i < num_ops; i++) {
-	    int16_t src1 = src[channel_op[i].src1][j];
-	    int16_t src2 = src[channel_op[i].src2][j];
 	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
-	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
-	    case ACAST_OP_ADD: {
-		int32_t sum = src1+src2;
-		if (sum > 32767) sum = 32767;
-		else if (sum < -32768) sum = -32768;
-		dst[channel_op[i].dst] = sum;
+	    case ACAST_OP_SRC1:
+		dst[channel_op[i].dst] = src[channel_op[i].src1][j];
 		break;
-	    }
-	    case ACAST_OP_SUB: {
-		int32_t sum = src1-src2;
-		if (sum > 32767) sum = 32767;
-		else if (sum < -32768) sum = -32768;
-		dst[channel_op[i].dst] = sum;
+	    case ACAST_OP_CONST1:
+		dst[channel_op[i].dst] = channel_op[i].src1;
 		break;
-	    }
+	    case ACAST_OP_ADD:
+		dst[channel_op[i].dst] =
+		    sum_i16(src[channel_op[i].src1][j],
+			    src[channel_op[i].src2][j]);
+		break;
+	    case ACAST_OP_SUB:
+		dst[channel_op[i].dst] =
+		    diff_i16(src[channel_op[i].src1][j],
+			     src[channel_op[i].src2][j]);
 	    }
 	}
 	dst += dst_channels_per_frame;
@@ -791,17 +827,26 @@ static void iop_i32(int32_t** src,
 		    uint32_t frames)
 {
     int j;
-    for (j = 0; j < frames; j++) {        
+    for (j = 0; j < frames; j++) {
 	int i;
 	for (i = 0;  i < num_ops; i++) {
-	    int32_t src1 = src[channel_op[i].src1][j];
-	    int32_t src2 = src[channel_op[i].src2][j];
 	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1: dst[channel_op[i].dst] = src1; break;
-	    case ACAST_OP_SRC2: dst[channel_op[i].dst] = src2; break;
-	    case ACAST_OP_ADD:  dst[channel_op[i].dst] = src1+src2; break;
-	    case ACAST_OP_SUB:  dst[channel_op[i].dst] = src1-src2; break;
-	    }
+	    case ACAST_OP_SRC1:
+		dst[channel_op[i].dst] = src[channel_op[i].src1][j];
+		break;
+	    case ACAST_OP_CONST1:
+		dst[channel_op[i].dst] = channel_op[i].src1;
+		break;
+	    case ACAST_OP_ADD:
+		dst[channel_op[i].dst] =
+		    sum_i32(src[channel_op[i].src1][j],
+			    src[channel_op[i].src2][j]);
+		break;
+	    case ACAST_OP_SUB:
+		dst[channel_op[i].dst] =
+		    diff_i32(src[channel_op[i].src1][j],
+			     src[channel_op[i].src2][j]);
+	    }	    
 	}
 	dst += dst_channels_per_frame;	
     }
@@ -863,6 +908,37 @@ int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops)
 	    channel_op[i].op   = ACAST_OP_SUB;
 	    ptr += 3;
 	    break;
+	    
+	case 'd': {
+	    int v = 0;
+	    int s = 1;
+	    if (ptr[1] == '-') { s = -1; ptr += 2; }
+	    else if (ptr[1] == '+') { s = 1; ptr += 2; }
+	    else ptr += 1;
+	    if (!isdigit(*ptr)) return -1;
+	    while(isdigit(*ptr)) {
+		v = v*10 + (*ptr - '0');
+		ptr++;
+	    }
+	    channel_op[i].src1 = (s < 0) ? -v : v;
+	    channel_op[i].src2 = 0;
+	    channel_op[i].dst  = i;
+	    channel_op[i].op   = ACAST_OP_CONST1;	    
+	    break;
+	}
+
+	case ',':  // separator
+	    ptr++;
+	    continue;
+	    
+	case 'z':
+	    channel_op[i].src1 = 0;
+	    channel_op[i].src2 = 0;
+	    channel_op[i].dst  = i;
+	    channel_op[i].op   = ACAST_OP_CONST1;
+	    ptr++;
+	    break;
+	    
 	default:
 	    if (!isdigit(ptr[0]))
 		return -1;
@@ -870,7 +946,7 @@ int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops)
 	    channel_op[i].src2 = ptr[0]-'0';
 	    channel_op[i].dst  = i;
 	    channel_op[i].op   = ACAST_OP_SRC1;
-	    ptr += 1;	    
+	    ptr++;
 	    break;
 	}
 	i++;
@@ -888,8 +964,8 @@ void print_channel_ops(acast_op_t* channel_op, size_t num_ops)
 	case ACAST_OP_SRC1:
 	    printf("%d", channel_op[i].src1);
 	    break;
-	case ACAST_OP_SRC2:
-	    printf("%d", channel_op[i].src2);
+	case ACAST_OP_CONST1:
+	    printf("d%d", channel_op[i].src1);
 	    break;
 	case ACAST_OP_ADD:
 	    printf("+%d%d", channel_op[i].src1, channel_op[i].src2);

@@ -62,8 +62,9 @@ printf("usage: mp3_sender [options] file\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
 "  -D, --debug     debug verbosity\n"              
-"  -a, --addr      multicast address (\"%s\")\n"
+"  -a, --maddr     multicast address (\"%s\")\n"
 "  -i, --iface     multicast interface address (\"%s\")\n"
+"  -u, --uaddr     unicast address (NULL)\n"       
 "  -p, --port      multicast address port (%d)\n"
 "  -l, --loop      enable multi cast loop (%d)\n"
 "  -t, --ttl       multicast ttl (%d)\n"
@@ -86,10 +87,11 @@ int main(int argc, char** argv)
     uint32_t seqno = 0;
     int sock;
     char* multicast_addr = MULTICAST_ADDR;
-    char* multicast_ifaddr = INTERFACE_ADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
     int multicast_loop = MULTICAST_LOOP;   // loopback multicast packets
     int multicast_ttl  = MULTICAST_TTL;
+    char* interface_addr = INTERFACE_ADDR;    // interface address
+    char* unicast_addr   = NULL;    
     struct sockaddr_in addr;
     socklen_t addrlen;
     hip_t hip;
@@ -123,8 +125,9 @@ int main(int argc, char** argv)
 	    {"help",   no_argument, 0,        'h'},
 	    {"verbose",no_argument, 0,        'v'},
 	    {"debug",  no_argument, 0,        'D'},
-	    {"addr",   required_argument, 0,  'a'},
+	    {"maddr",   required_argument, 0, 'a'},
 	    {"iface",  required_argument, 0,  'i'},
+	    {"uaddr",  required_argument, 0,  'u'},	    
 	    {"port",   required_argument, 0,  'p'},
 	    {"ttl",    required_argument, 0,  't'},
 	    {"loop",   no_argument, 0,        'l'},
@@ -134,7 +137,7 @@ int main(int argc, char** argv)
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhvDa:i:p:t:c:m:",
+	c = getopt_long(argc, argv, "lhvDa:u:i:p:t:c:m:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -160,8 +163,11 @@ int main(int argc, char** argv)
 	    multicast_addr = strdup(optarg);
 	    break;
 	case 'i':
-	    multicast_ifaddr = strdup(optarg);
+	    interface_addr = strdup(optarg);
 	    break;
+	case 'u':
+	    unicast_addr = strdup(optarg);
+	    break;	    	    
 	case 'p':
 	    multicast_port = atoi(optarg);
 	    if ((multicast_port < 1) || (multicast_port > 65535)) {
@@ -235,17 +241,30 @@ int main(int argc, char** argv)
     fmt = SND_PCM_FORMAT_S16_LE;
     sent_frames = 0;
 
-    if ((sock = acast_sender_open(multicast_addr,
-				  multicast_ifaddr,
-				  multicast_port,
-				  multicast_ttl,
-				  multicast_loop,
-				  &addr, &addrlen,
-				  network_bufsize)) < 0) {
-	fprintf(stderr, "unable to open multicast socket %s\n",
-		strerror(errno));
-	exit(1);
+    if (unicast_addr != NULL) {
+	if ((sock = acast_usender_open(unicast_addr, interface_addr,
+				       multicast_port,
+				       &addr, &addrlen,
+				       network_bufsize)) < 0) {
+	    fprintf(stderr, "unable to open unicast socket %s\n",
+		    strerror(errno));
+	    exit(1);
+	}
     }
+    else {
+	if ((sock = acast_sender_open(multicast_addr,
+				      interface_addr,
+				      multicast_port,
+				      multicast_ttl,
+				      multicast_loop,
+				      &addr, &addrlen,
+				      network_bufsize)) < 0) {
+	    fprintf(stderr, "unable to open multicast socket %s\n",
+		    strerror(errno));
+	    exit(1);
+	}
+    }
+    
     mparam.format = fmt;
     mparam.sample_rate = mp3.samplerate;
     mparam.channels_per_frame = num_output_channels;

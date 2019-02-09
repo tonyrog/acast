@@ -16,13 +16,15 @@
 #include <alsa/asoundlib.h>
 
 // default values
-#define MULTICAST_ADDR  "224.0.0.2"
-#define MULTICAST_PORT  22402
+#define MULTICAST_ADDR  "224.0.0.223"
+#define MULTICAST_PORT  22402          // audio data
 #define INTERFACE_ADDR  "0.0.0.0"
+#define CONTROL_PORT    22403          // control data
+#define CONTROL_MAGIC   0x41434143     // "ACAC"
 
 #define BYTES_PER_PACKET 1472     // try avoid ip fragmentation
 
-typedef struct _acast_params_t
+typedef struct
 {
     int8_t   format;   // snd_pcm_format_t (allow UNKNOWN =-1 to be passed)
     uint8_t  channels_per_frame;     // channels per frame
@@ -31,7 +33,7 @@ typedef struct _acast_params_t
     uint32_t sample_rate;            // sample rate
 } acast_params_t;
 
-typedef struct _acast_t
+typedef struct
 {
     uint32_t seqno;          // simple sequence number
     uint32_t num_frames;     // number of frames in packet
@@ -39,17 +41,26 @@ typedef struct _acast_t
     uint8_t  data[0];        // audio data
 } acast_t;
 
-#define ACAST_OP_SRC1 0
-#define ACAST_OP_SRC2 1
-#define ACAST_OP_ADD  2   // src1 + src2
-#define ACAST_OP_SUB  3   // src1 - src2
-
-typedef struct _acast_op_t
+typedef struct
 {
-    uint8_t src1;
-    uint8_t src2;
-    uint8_t dst;
-    uint8_t op;
+    uint32_t magic;          // control magic
+    uint32_t mask;           // channels requested
+    uint32_t check;          // crc32 (address+port+magic+mask)
+} actl_t;
+
+typedef enum {
+    ACAST_OP_SRC1,
+    ACAST_OP_CONST1,
+    ACAST_OP_ADD,
+    ACAST_OP_SUB,
+} acast_channel_op_t;
+
+typedef struct
+{
+    acast_channel_op_t op;
+    int src1;
+    int src2;
+    int dst;
 } acast_op_t;
 
 extern void acast_clear_param(acast_params_t* acast);
