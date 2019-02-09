@@ -130,18 +130,20 @@ int wav_decode(int fd, uint8_t* buf, wav_header_t* hdr,
     
 void wav_print(FILE* f, wav_header_t* ptr)
 {
-    fprintf(f, "AudioFormat=%04x\n", ptr->AudioFormat);
-    fprintf(f, "NumChannels=%d\n", ptr->NumChannels);
-    fprintf(f, "SampleRate=%d\n", ptr->SampleRate);
-    fprintf(f, "ByteRate=%d\n", ptr->ByteRate);
-    fprintf(f, "BlockAlign=%d\n", ptr->BlockAlign);
-    fprintf(f, "BitsPerChannel=%d\n", ptr->BitsPerChannel);
+    fprintf(f, "wav params:\n");
+    fprintf(f, "  AudioFormat=%04x\n", ptr->AudioFormat);
+    fprintf(f, "  NumChannels=%d\n", ptr->NumChannels);
+    fprintf(f, "  SampleRate=%d\n", ptr->SampleRate);
+    fprintf(f, "  ByteRate=%d\n", ptr->ByteRate);
+    fprintf(f, "  BlockAlign=%d\n", ptr->BlockAlign);
+    fprintf(f, "  BitsPerChannel=%d\n", ptr->BitsPerChannel);
 }
 
 void xwav_print(FILE* f, xwav_header_t* ptr)
 {
-    fprintf(f, "cbSize=%d\n", ptr->cbSize);
-    fprintf(f, "ValidBitsPerChannel=%d\n", ptr->ValidBitsPerChannel);
-    fprintf(f, "ChannelMask=%x\n", ptr->ChannelMask);
-    fprintf(f, "AudioFormat=%04x\n", ptr->AudioFormat);
+    fprintf(f, "extended wav params:\n");  
+    fprintf(f, "  cbSize=%d\n", ptr->cbSize);
+    fprintf(f, "  ValidBitsPerChannel=%d\n", ptr->ValidBitsPerChannel);
+    fprintf(f, "  ChannelMask=%x\n", ptr->ChannelMask);
+    fprintf(f, "  AudioFormat=%04x\n", ptr->AudioFormat);
 }

@@ -63,6 +63,7 @@ printf("usage: acast_sender [options]\n"
 "  -t, --ttl       multicast ttl (%d)\n"
 "  -d, --device    capture device (%s)\n"
 "  -c, --channels  number of output channels (%d)\n"
+"  -C, --ichannels  number of input channels (%d)\n"
 "  -m, --map       channel map (%s)\n",
        MULTICAST_ADDR,
        INTERFACE_ADDR,
@@ -72,6 +73,7 @@ printf("usage: acast_sender [options]\n"
        MULTICAST_TTL,
        CAPTURE_DEVICE,
        NUM_CHANNELS,
+       NUM_CHANNELS,       
        CHANNEL_MAP);
 }
 
@@ -124,6 +126,7 @@ int main(int argc, char** argv)
     char* interface_addr = INTERFACE_ADDR; // interface address
     uint16_t control_port = CONTROL_PORT;
     int num_output_channels = 0;
+    int num_input_channels = 2;
     char* map = CHANNEL_MAP;
     acast_op_t channel_op[MAX_CHANNEL_OP];
     uint8_t    channel_map[MAX_CHANNEL_MAP];
@@ -159,11 +162,12 @@ int main(int argc, char** argv)
 	    {"loop",   no_argument, 0,       'l'},
 	    {"device", required_argument, 0, 'd'},
 	    {"channels",required_argument, 0, 'c'},
+	    {"ichannels",required_argument, 0, 'C'},	    
 	    {"map",     required_argument, 0, 'm'},
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhvDa:i:p:q:t:d:",
+	c = getopt_long(argc, argv, "lhvDa:i:p:q:t:d:c:C:m:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -211,6 +215,9 @@ int main(int argc, char** argv)
 	case 'c':
 	    num_output_channels = atoi(optarg);
 	    break;
+	case 'C':
+	    num_input_channels = atoi(optarg);
+	    break;	    
 	case 'm':
 	    map = strdup(optarg);
 	    break;
@@ -231,8 +238,8 @@ int main(int argc, char** argv)
     acast_clear_param(&iparam);
     // setup wanted paramters
     iparam.format = SND_PCM_FORMAT_S16_LE;
-    iparam.sample_rate = 22000;
-    iparam.channels_per_frame = 6;
+    iparam.sample_rate = 48000;
+    iparam.channels_per_frame = num_input_channels;
     acast_setup_param(handle, &iparam, &sparam, &snd_frames_per_packet);
     bytes_per_frame = sparam.bytes_per_channel * sparam.channels_per_frame;
 
@@ -321,6 +328,7 @@ int main(int argc, char** argv)
     bytes_per_frame = num_output_channels * mparam.bytes_per_channel;
 
     last_time = time_tick_now();
+    first_time = time_tick_now();
     
     while(1) {
 	int r;
@@ -391,20 +399,17 @@ int main(int argc, char** argv)
 	    }
 	    else {
 		sent_frames++;
-		if ((sent_frames & 0xff) == 0) {		    
+		if ((sent_frames & 0xff) == 0) {
 		    if (verbose > 1) {
-			fprintf(stderr, "SEND RATE = %ldHz, %.2fMb/s\n",
-				(1000000*sent_frames*frames_per_packet)/
-				(last_time-first_time),
+			fprintf(stderr, "SEND RATE = %.2fKHz, %.2fMb/s\n",
+				(1000*sent_frames*frames_per_packet)/
+				((double)(last_time-first_time)),
 				((1000000*sent_frames*8*BYTES_PER_PACKET)/
 				 (double)(last_time-first_time)) /
 				(double)(1024*1024));
 		    }
 		    if (verbose > 3)
 			acast_print(stderr, dst);
-		}
-		if (sent_frames == 1) {
-		    first_time = last_time;
 		}
 		last_time = time_tick_now();
 	    }

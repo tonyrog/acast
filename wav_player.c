@@ -59,9 +59,10 @@ int main(int argc, char** argv)
     snd_pcm_uframes_t wav_frames_per_packet;
     snd_pcm_uframes_t snd_frames_per_packet;
     snd_pcm_uframes_t frames_per_packet;
-    size_t snd_bytes_per_frame;    
+    size_t snd_bytes_per_frame;
     size_t bytes_per_frame;
     uint32_t seqno = 0;
+    int play_started = 0;
     int err;
     snd_pcm_format_t fmt;
     wav_header_t wav;
@@ -140,10 +141,20 @@ int main(int argc, char** argv)
 	fprintf(stderr, "no wav data found\n");
 	exit(1);
     }
-    
+
     // max number of packets from wav format
     wav_frames_per_packet =
-	wav_get_frames_per_buffer(&wav,BYTES_PER_PACKET - sizeof(acast_t));
+	wav_get_frames_per_buffer(&wav,BYTES_PER_PACKET - sizeof(acast_t));    
+
+    if (verbose > 1) {
+	wav_print(stderr, &wav);
+	if (wav.AudioFormat == xwav.AudioFormat)
+	    xwav_print(stderr, &xwav);
+	fprintf(stderr, "  wav_frames_per_packet = %lu\n",
+		wav_frames_per_packet);	
+    }
+    
+
 	
     // normally we want to acast 6 channels but now we select the
     // native wav format for testing
@@ -168,7 +179,7 @@ int main(int argc, char** argv)
 	}
     }
 
-    if ((map_type = build_channel_map(channel_op, MAX_CHANNEL_MAP,
+    if ((map_type = build_channel_map(channel_op, num_channel_ops,
 				      channel_map, MAX_CHANNEL_MAP,
 				      wav.NumChannels,
 				      &num_output_channels)) < 0) {
@@ -179,16 +190,11 @@ int main(int argc, char** argv)
     if (verbose) {
 	printf("Channel map: ");
 	print_channel_ops(channel_op, num_channel_ops);
-	printf("use_channel_map: %d\n", (map_type > 0));
-	printf("id_channel_map: %d\n",  (map_type == 1));
-	printf("num_output_channels = %d\n", num_output_channels);
+	printf("  use_channel_map = %d\n", (map_type > 0));
+	printf("  id_channel_map = %d\n",  (map_type == 1));
+	printf("  num_output_channels = %d\n", num_output_channels);
     }
 
-    if (verbose > 1) {
-	wav_print(stderr, &wav);
-	if (wav.AudioFormat == xwav.AudioFormat)
-	    xwav_print(stderr, &xwav);
-    }
 
     if ((fmt = wav_to_snd(wav.AudioFormat, wav.BitsPerChannel)) ==
 	SND_PCM_FORMAT_UNKNOWN) {
@@ -213,30 +219,27 @@ int main(int argc, char** argv)
     if (verbose) {
 	fprintf(stderr, "snd params:\n");
 	acast_print_params(stderr, &sparam);
-	fprintf(stderr, "  snd_bytes_per_frame:%ld\n",
+	fprintf(stderr, "  snd_bytes_per_frame = %d\n",
 		snd_bytes_per_frame);
-	fprintf(stderr, "  snd_frames_per_packet:%ld\n",
+	fprintf(stderr, "  snd_frames_per_packet = %lu\n",
 		snd_frames_per_packet);
-	fprintf(stderr, "----------------\n");
     }
+    
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = snd_frames_per_packet;
     snd_pcm_format_set_silence(sparam.format, silence->data,
-			       snd_frames_per_packet*snd_bytes_per_frame);
-    acast_play(handle, snd_bytes_per_frame,
-	       silence->data, silence->num_frames);
-    acast_play(handle, snd_bytes_per_frame,
-	       silence->data, silence->num_frames);
-    snd_pcm_start(handle);	
+			       snd_frames_per_packet*
+			       sparam.channels_per_frame);
+    
 
     frames_per_packet = min(snd_frames_per_packet,wav_frames_per_packet);
 
     bytes_per_frame = num_output_channels * sparam.bytes_per_channel;
 
     if (verbose) {
-	fprintf(stderr, "  num_output_channels:%d\n", num_output_channels);
-	fprintf(stderr, "  bytes_per_frame:%ld\n",  bytes_per_frame);
-	fprintf(stderr, "  frames_per_packet:%ld\n", frames_per_packet);
+	fprintf(stderr, "  num_output_channels = %d\n", num_output_channels);
+	fprintf(stderr, "  bytes_per_frame = %d\n",  bytes_per_frame);
+	fprintf(stderr, "  frames_per_packet = %lu\n", frames_per_packet);
     }
 
     // fixme we probably need cast_buffer and play_buffer!!!!
@@ -284,6 +287,14 @@ int main(int argc, char** argv)
 	dst->num_frames = n;
 	if ((verbose > 3) && (dst->seqno % 100 == 0)) {
 	    acast_print(stderr, dst);
+	}
+	if (!play_started) {
+	  acast_play(handle, snd_bytes_per_frame,
+		     silence->data, silence->num_frames);
+	  acast_play(handle, snd_bytes_per_frame,
+		     silence->data, silence->num_frames);
+	  snd_pcm_start(handle);
+	  play_started = 1;
 	}
 	acast_play(handle, bytes_per_frame, dst->data, dst->num_frames);
     }

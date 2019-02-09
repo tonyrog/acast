@@ -130,7 +130,7 @@ int main(int argc, char** argv)
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhva:i:p:t:d:",
+	c = getopt_long(argc, argv, "lhva:i:p:t:d:c:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -226,7 +226,7 @@ int main(int argc, char** argv)
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = frames_per_packet;
     snd_pcm_format_set_silence(sparam.format, silence->data,
-			       frames_per_packet*bytes_per_frame);
+			       frames_per_packet*sparam.channels_per_frame);
 
     // flush_packets(sock);
     
@@ -281,14 +281,9 @@ int main(int argc, char** argv)
 		bytes_per_frame = sparam.bytes_per_channel*
 		    sparam.channels_per_frame;
 		silence->num_frames = frames_per_packet;
-		snd_pcm_format_set_silence(sparam.format,
-					   silence->data,
-					   frames_per_packet*bytes_per_frame);
-		acast_play(handle,bytes_per_frame,
-			    silence->data,silence->num_frames);
-		acast_play(handle,bytes_per_frame,
-			   silence->data,silence->num_frames);
-		snd_pcm_start(handle);
+		snd_pcm_format_set_silence(sparam.format,silence->data,
+	                       frames_per_packet*sparam.channels_per_frame);
+		seen_packet = 0;
 	    }
 
 	    switch(map_type) {
