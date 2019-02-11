@@ -129,5 +129,4 @@ extern int wav_decode(int fd, uint8_t* buf, wav_header_t* hdr,
 extern void wav_print(FILE* f, wav_header_t* ptr);
 extern void xwav_print(FILE* f, xwav_header_t* ptr);
 
-					       
 #endif

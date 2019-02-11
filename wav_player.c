@@ -20,10 +20,7 @@
 
 #define PLAYBACK_DEVICE "default"
 #define NUM_CHANNELS   2
-
 #define CHANNEL_MAP   "auto"
-#define MAX_CHANNEL_OP  16
-#define MAX_CHANNEL_MAP 8
 
 #define MAX_U_32_NUM    0xFFFFFFFF
 
@@ -124,6 +121,8 @@ int main(int argc, char** argv)
 	help();
 	exit(1);
     }
+
+    time_tick_init();    
     
     filename = argv[optind];
     if ((fd = open(filename, O_RDONLY)) < 0) {
@@ -131,8 +130,6 @@ int main(int argc, char** argv)
 		filename, strerror(errno));
 	exit(1);
     }
-
-    time_tick_init();
     
     if ((ret = wav_decode_init(fd, &wav, &xwav, &num_frames)) < 0) {
 	fprintf(stderr, "no wav data found\n");
@@ -141,7 +138,7 @@ int main(int argc, char** argv)
 
     // max number of packets from wav format
     wav_frames_per_packet =
-	wav_get_frames_per_buffer(&wav,BYTES_PER_PACKET - sizeof(acast_t));    
+	wav_get_frames_per_buffer(&wav,BYTES_PER_PACKET - sizeof(acast_t));
 
     if (verbose > 1) {
 	wav_print(stderr, &wav);

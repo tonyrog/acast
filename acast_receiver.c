@@ -16,14 +16,9 @@
 #include "acast.h"
 
 #define PLAYBACK_DEVICE "default"
-
 #define NUM_CHANNELS  0
-
 #define CHANNEL_MAP   "auto"
-#define MAX_CHANNEL_OP  16
-#define MAX_CHANNEL_MAP 8
-
-#define SRC_CHANNELS 6  // max number of channels supported
+#define SRC_CHANNELS 6           // max number of channels supported
 
 void help(void)
 {

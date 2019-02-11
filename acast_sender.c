@@ -19,10 +19,7 @@
 
 #define CAPTURE_DEVICE "default"
 #define NUM_CHANNELS  6
-
 #define CHANNEL_MAP   "auto"
-#define MAX_CHANNEL_OP  16
-#define MAX_CHANNEL_MAP 8
 
 #define MAX_CLIENTS     8
 

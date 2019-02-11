@@ -22,16 +22,12 @@
 #include "tick.h"
 #include "wav.h"
 
-
 #define PLAYBACK_DEVICE "default"
 // ttl=0 local host, ttl=1 local network
 #define MULTICAST_TTL  1
 #define MULTICAST_LOOP 0
 #define NUM_CHANNELS   0
-
 #define CHANNEL_MAP   "auto"
-#define MAX_CHANNEL_OP  16
-#define MAX_CHANNEL_MAP 8
 
 #define MAX_U_32_NUM    0xFFFFFFFF
 

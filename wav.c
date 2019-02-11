@@ -1,6 +1,13 @@
 #include <stdint.h>
 #include "wav.h"
+#include "acast_file.h"
 
+typedef struct
+{
+    wav_header_t wav;
+    xwav_header_t xwav;
+} wav_file_private_t;
+    
 #define MAX_U_32_NUM    0xFFFFFFFF
 
 snd_pcm_format_t wav_to_snd(uint16_t format, int bits_per_channel)
@@ -147,3 +154,83 @@ void xwav_print(FILE* f, xwav_header_t* ptr)
     fprintf(f, "  ChannelMask=%x\n", ptr->ChannelMask);
     fprintf(f, "  AudioFormat=%04x\n", ptr->AudioFormat);
 }
+
+
+static int af_read(struct _acast_file_t* af,
+		   acast_buffer_t* abuf,
+		   void* buffer, size_t bufsize,
+		   size_t num_frames)
+{
+    wav_file_private_t* private = af->private;
+    size_t bytes_per_channel = (private->wav.BitsPerChannel+7)/8;
+    uint8_t* ptr;
+    int i, n;
+    
+    if ((n = wav_decode(af->fd,buffer,&private->wav,num_frames)) < 0)
+	return -1;
+    ptr = buffer;
+    abuf->size = private->wav.NumChannels;
+    for (i = 0; i < private->wav.NumChannels; i++) {
+	abuf->stride[i] = private->wav.NumChannels;
+	abuf->data[i] = ptr;
+	ptr += bytes_per_channel;
+    }
+    return n;
+}
+
+static int af_write(struct _acast_file_t* af,
+		    acast_buffer_t* abuf,
+		    size_t num_frames)
+{
+    return -1;
+}
+
+static int af_close(struct _acast_file_t* af)
+{
+    int r;
+    r = close(af->fd);
+    if (af->private) free(af->private);
+    free(af);
+    return r;
+}
+
+acast_file_t* wav_file_open(char* filename, int mode)
+{
+    int fd;
+    wav_header_t wav;
+    xwav_header_t xwav;    
+    uint32_t num_frames;
+    int compressed;
+    wav_file_private_t* private;
+    acast_file_t* af;
+    
+    if ((fd = open(filename, mode)) < 0)
+	return NULL;
+    
+    if ((compressed = wav_decode_init(fd, &wav, &xwav, &num_frames)) < 0) {
+	close(fd);	
+	return NULL;
+    }
+
+    if ((af = malloc(sizeof(acast_file_t))) == NULL) {
+	close(fd);
+	return NULL;
+    }    
+
+    if ((private = malloc(sizeof(wav_file_private_t))) == NULL) {
+	close(fd);
+	free(af);
+	return NULL;
+    }
+    private->wav = wav;
+    private->xwav = xwav;
+
+    af->fd = fd;
+    af->private = private;
+    af->num_frames = num_frames;
+    af->read = af_read;
+    af->write = af_write;
+    af->close = af_close;
+    return af;
+}
+

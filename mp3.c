@@ -11,9 +11,39 @@
 
 #include <lame/lame.h>
 #include "mp3.h"
+#include "acast_file.h"
+
+#define MP3_VERBOSE 1
+
+typedef struct
+{
+    hip_t hip;
+    mp3data_struct mp3;
+    int enc_delay;
+    int enc_padding;
+} mp3_file_private_t;
+
+static hip_t hip;
+static int need_init = 1;
 
 static int in_id3v2_size = -1;
 static uint8_t* in_id3v2_tag = NULL;
+
+static void emit_message(const char* format, va_list ap)
+{
+    vfprintf(stderr, format, ap);
+}
+
+static void emit_error(const char* format, va_list ap)
+{
+    vfprintf(stderr, format, ap);
+}
+
+static void emit_debug(const char* format, va_list ap)
+{
+    vfprintf(stderr, format, ap);
+}
+
 
 static int check_aid(uint8_t* header)
 {
@@ -205,3 +235,95 @@ void mp3_print(FILE* f, mp3data_struct* ptr)
     fprintf(f, "nsamp=%lu\n",        ptr->nsamp);
     fprintf(f, "mode=%d\n",          ptr->mode);
 }
+
+
+static int af_read(struct _acast_file_t* af,
+		   acast_buffer_t* abuf,
+		   void* buffer, size_t bufsize,
+		   size_t num_frames)
+{
+    mp3_file_private_t* private = af->private;
+    int16_t* pcm_l;
+    int16_t* pcm_r;
+    int n;
+
+    if (bufsize < 1152*2*2)  // too small
+	return -1;
+    pcm_l = buffer;
+    pcm_r = (buffer + bufsize/2);
+    
+    if ((n = mp3_decode(af->fd,hip,pcm_l,pcm_r,&private->mp3)) < 0)
+	return -1;
+    abuf->size = 2;
+    abuf->stride[0] = 1;
+    abuf->stride[1] = 1;
+    abuf->data[0] = pcm_l;
+    abuf->data[1] = pcm_r;
+    return n;
+}
+
+static int af_write(struct _acast_file_t* af,
+		    acast_buffer_t* abuf,
+		    size_t num_frames)
+{
+    return -1;
+}
+
+static int af_close(struct _acast_file_t* af)
+{
+    int r;
+    r = close(af->fd);
+    if (af->private) free(af->private);
+    free(af);
+    return r;
+}
+
+acast_file_t* mp3_file_open(char* filename, int mode)
+{
+    int fd;
+    mp3data_struct mp3;    
+    mp3_file_private_t* private;
+    int enc_delay, enc_padding;    
+    acast_file_t* af;
+    
+    if ((fd = open(filename, mode)) < 0)
+	return NULL;
+
+    if (need_init) {  // FIXME: lock
+	need_init = 0;
+	if ((hip = hip_decode_init()) == NULL)
+	    return NULL;
+	hip_set_msgf(hip, MP3_VERBOSE ? emit_message : 0);
+	hip_set_errorf(hip, MP3_VERBOSE ? emit_error : 0);
+	hip_set_debugf(hip, emit_debug);
+    }
+
+    if (mp3_decode_init(fd, hip, &mp3, &enc_delay, &enc_padding) < 0) {
+	fprintf(stderr, "failed detect mp3 file format\n");
+	exit(1);
+    }
+    
+    if ((af = malloc(sizeof(acast_file_t))) == NULL) {
+	close(fd);
+	return NULL;
+    }
+
+    if ((private = malloc(sizeof(mp3_file_private_t))) == NULL) {
+	close(fd);
+	free(af);
+	return NULL;
+    }
+    private->hip = hip;
+    private->mp3 = mp3;
+    private->enc_delay = enc_delay;
+    private->enc_padding = enc_padding;
+    
+    af->fd = fd;
+    af->private = private;
+    af->num_frames = 0;    // unknown
+    af->read = af_read;
+    af->write = af_write;
+    af->close = af_close;
+    return af;
+}
+

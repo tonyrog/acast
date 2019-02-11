@@ -22,10 +22,7 @@
 
 #define PLAYBACK_DEVICE "default"
 #define NUM_CHANNELS   2
-
 #define CHANNEL_MAP   "auto"
-#define MAX_CHANNEL_OP  16
-#define MAX_CHANNEL_MAP 8
 
 #define MAX_U_32_NUM    0xFFFFFFFF
 #define MP3BUFFER_SIZE  4096
@@ -68,16 +65,6 @@ printf("usage: mp3_player [options] file\n"
        CHANNEL_MAP);       
 }
 
-static inline uint32_t mp3_get_bytes_per_frame(mp3data_struct* mp3)
-{
-    return mp3->stereo*2;  // 2 byte per channel 
-}
-
-static inline snd_pcm_uframes_t mp3_get_frames_per_buffer(mp3data_struct* mp3,
-							  size_t buffer_size)
-{
-    return buffer_size / mp3_get_bytes_per_frame(mp3);
-}
 
 
 int main(int argc, char** argv)

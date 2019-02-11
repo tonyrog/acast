@@ -26,6 +26,8 @@
 
 #define BYTES_PER_PACKET 1472     // try avoid ip fragmentation
 
+#define MAX_CHANNELS 16
+
 typedef struct
 {
     int8_t   format;   // snd_pcm_format_t (allow UNKNOWN =-1 to be passed)
@@ -42,6 +44,13 @@ typedef struct
     acast_params_t param;    // format params
     uint8_t  data[0];        // audio data
 } acast_t;
+
+typedef struct
+{
+    size_t size;                 // number of segments/channels
+    size_t stride[MAX_CHANNELS]; // data stride for each pointer
+    void*  data[MAX_CHANNELS];   // pointer to each data channel
+} acast_buffer_t;
 
 typedef struct
 {
