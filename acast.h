@@ -15,6 +15,8 @@
 #define ALSA_PCM_NEW_HW_PARAMS_API
 #include <alsa/asoundlib.h>
 
+#include "acast_channel.h"
+
 // default values
 #define MULTICAST_ADDR  "224.0.0.223"
 #define MULTICAST_PORT  22402          // audio data
@@ -48,20 +50,6 @@ typedef struct
     uint32_t check;          // crc32 (address+port+magic+mask)
 } actl_t;
 
-typedef enum {
-    ACAST_OP_SRC1,
-    ACAST_OP_CONST1,
-    ACAST_OP_ADD,
-    ACAST_OP_SUB,
-} acast_channel_op_t;
-
-typedef struct
-{
-    acast_channel_op_t op;
-    int src1;
-    int src2;
-    int dst;
-} acast_op_t;
 
 extern void acast_clear_param(acast_params_t* acast);
 extern void acast_print_params(FILE* f, acast_params_t* params);
@@ -80,37 +68,30 @@ extern long acast_play(snd_pcm_t* handle, size_t bytes_per_frame,
 extern long acast_record(snd_pcm_t* handle, size_t bytes_per_frame,
 			 uint8_t* buf, size_t len);
 
-// rearrange interleaved channels
-// Select channels in src using channel_map
-// and put in dst
-//
-extern void map_channels(snd_pcm_format_t fmt,
-			 void* src, unsigned int src_channels_per_frame,
-			 void* dst, unsigned int dst_channels_per_frame,
-			 uint8_t* channel_map,
-			 uint32_t frames);
 
-extern void op_channels(snd_pcm_format_t fmt,
-			void* src, unsigned int src_channels_per_frame,
-			void* dst, unsigned int dst_channels_per_frame,
-			acast_op_t* channel_op, size_t num_ops,
-			uint32_t frames);
+extern void scatter_gather_ii(snd_pcm_format_t fmt,
+			      void* src, size_t nsrc,
+			      void* dst, size_t ndst,
+			      acast_op_t* channel_op, size_t num_ops,
+			      size_t frames);
 
-// source channels are separate result is interleaved
-extern void imap_channels(snd_pcm_format_t fmt,
-			  void** src,
-			  unsigned int dst_channels_per_frame,
-			  void* dst,
-			  uint8_t* channel_map,
-			  uint32_t frames);
+extern void permute_ii(snd_pcm_format_t fmt,
+		       void* src, size_t nsrc,
+		       void* dst, size_t ndst,
+		       uint8_t* channel_map,
+		       size_t frames);
 
-extern void iop_channels(snd_pcm_format_t fmt,
-			 void** src,
-			 unsigned int src_channels_per_frame,
-			 void* dst, unsigned int dst_channels_per_frame,
-			 acast_op_t* channel_op, size_t num_ops,
-			 uint32_t frames);
+extern void permute_ni(snd_pcm_format_t fmt,
+		       void** src, size_t nsrc,
+		       void* dst, size_t ndst,
+		       uint8_t* channel_map,
+		       size_t frames);
 
+extern void scatter_gather_ni(snd_pcm_format_t fmt,
+			      void** src, size_t* src_stride,
+			      void* dst, size_t dst_stride,
+			      acast_op_t* channel_op, size_t num_ops,
+			      size_t frames);
 
 
 extern int acast_sender_open(char* maddr, char* ifaddr, int mport,
@@ -126,17 +107,4 @@ extern int acast_usender_open(char* uaddr, char* ifaddr, int port,
 			      struct sockaddr_in* addr, socklen_t* addrlen,
 			      size_t bufsize);
 
-extern void print_channel_ops(acast_op_t* channel_op, size_t num_ops);
-
-extern int build_channel_map(acast_op_t* channel_op, size_t num_channel_ops,
-			     uint8_t* channel_map, size_t max_channel_map,
-			     int num_src_channels, int* num_dst_channels);
-
-extern int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops);
-
-extern int parse_channel_map(char* map,
-			     acast_op_t* channel_op, size_t max_channel_ops,
-			     size_t* num_channel_ops,
-			     uint8_t* channel_map, size_t max_channel_map,
-			     int num_src_channels, int* num_dst_channels);
 #endif

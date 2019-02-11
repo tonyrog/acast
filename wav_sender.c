@@ -92,16 +92,13 @@ int main(int argc, char** argv)
     uint32_t num_frames;
     int num_output_channels = NUM_CHANNELS;
     char* map = CHANNEL_MAP;
-    acast_op_t channel_op[MAX_CHANNEL_OP];
-    uint8_t    channel_map[MAX_CHANNEL_MAP];
-    size_t     num_channel_ops;
+    acast_channel_ctx_t chan_ctx;    
     size_t     network_bufsize = 4*BYTES_PER_PACKET;
     tick_t     last_time;
     tick_t     first_time = 0;
     tick_t     send_time = 0;
     uint64_t   frame_delay_us;      // delay per frame in us
     uint64_t   sent_frames = 0;     // number of frames sent
-    int map_type;
     
     while(1) {
 	int option_index = 0;
@@ -189,21 +186,15 @@ int main(int argc, char** argv)
     // max number of packets from wav format
     wav_frames_per_packet =
 	wav_get_frames_per_buffer(&wav,BYTES_PER_PACKET - sizeof(acast_t));
-	
-    if ((map_type = parse_channel_map(map,
-				      channel_op, MAX_CHANNEL_OP,
-				      &num_channel_ops,
-				      channel_map, MAX_CHANNEL_MAP,
-				      wav.NumChannels,&num_output_channels))<0){
+
+    if (parse_channel_ctx(map,&chan_ctx,wav.NumChannels,
+			  &num_output_channels)<0) {
 	fprintf(stderr, "map synatx error\n");
 	exit(1);
     }
 
     if (verbose) {
-	printf("Channel map: ");
-	print_channel_ops(channel_op, num_channel_ops);
-	printf("use_channel_map: %d\n", (map_type>0));
-	printf("id_channel_map: %d\n",  (map_type==1));
+	print_channel_ctx(stdout, &chan_ctx);
 	printf("num_output_channels = %d\n", num_output_channels);
     }
 
@@ -276,26 +267,29 @@ int main(int argc, char** argv)
 	    exit(1);
 	}
 
-	switch(map_type) {
-	case 1:
+	switch(chan_ctx.type) {
+	case ACAST_MAP_PERMUTE:
 	    dst = (acast_t*) dst_buffer;
 	    dst->param = mparam;
-	    map_channels(mparam.format,
-			 src->data, wav.NumChannels,
-			 dst->data, num_output_channels, 
-			 channel_map,
-			 frames_per_packet);
+	    permute_ii(mparam.format,
+		       src->data, wav.NumChannels,
+		       dst->data, num_output_channels, 
+		       chan_ctx.channel_map,
+		       frames_per_packet);
 	    break;
-	case 2:
+	case ACAST_MAP_OP:
 	    dst = (acast_t*) dst_buffer;
 	    dst->param = mparam;
-	    op_channels(mparam.format,
-			src->data, wav.NumChannels,
-			dst->data, num_output_channels,
-			channel_op, num_channel_ops,
-			frames_per_packet);
+	    scatter_gather_ii(mparam.format,
+			      src->data, wav.NumChannels,
+			      dst->data, num_output_channels,
+			      chan_ctx.channel_op, chan_ctx.num_channel_ops,
+			      frames_per_packet);
 	    break;
-	case 0:
+	case ACAST_MAP_ID:	    
+	    dst = src;
+	    dst->param = mparam;
+	    break;
 	default:
 	    dst = src;
 	    dst->param = mparam;	    

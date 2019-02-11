@@ -105,9 +105,7 @@ int main(int argc, char** argv)
     int enc_delay, enc_padding;
     int num_output_channels = NUM_CHANNELS;
     char* map = CHANNEL_MAP;
-    acast_op_t channel_op[MAX_CHANNEL_OP];
-    uint8_t    channel_map[MAX_CHANNEL_MAP];
-    size_t num_channel_ops;    
+    acast_channel_ctx_t chan_ctx;
     size_t bytes_per_frame;
     size_t bytes_to_send;    
     size_t network_bufsize = 4*BYTES_PER_PACKET;
@@ -116,7 +114,6 @@ int main(int argc, char** argv)
     tick_t send_time = 0;
     uint64_t frame_delay_us;  // delay per frame in us
     uint64_t sent_frames;     // number of frames sent
-    int map_type;
     
     while(1) {
 	int option_index = 0;
@@ -215,20 +212,13 @@ int main(int argc, char** argv)
 	exit(1);
     }
 
-    if ((map_type = parse_channel_map(map,
-				      channel_op, MAX_CHANNEL_OP,
-				      &num_channel_ops,
-				      channel_map, MAX_CHANNEL_MAP,
-				      mp3.stereo,&num_output_channels))<0) {
+    if (parse_channel_ctx(map,&chan_ctx,mp3.stereo,&num_output_channels)<0) {
 	fprintf(stderr, "map synatx error\n");
 	exit(1);
     }
     
     if (verbose) {
-	printf("Channel map: ");
-	print_channel_ops(channel_op, num_channel_ops);
-	printf("use_channel_map: %d\n", (map_type > 0));
-	printf("id_channel_map: %d\n",  (map_type == 1));
+	print_channel_ctx(stdout, &chan_ctx);
 	printf("num_output_channels = %d\n", num_output_channels);
     }    
     
@@ -287,6 +277,7 @@ int main(int argc, char** argv)
 				   &pcm_l[pcm_remain],
 				   &pcm_r[pcm_remain], &mp3)) > 0) {
 	void* channels[2];
+	size_t stride[2] = {1, 1};
 	int16_t *lptr = pcm_l;
 	int16_t *rptr = pcm_r;
 	char dst_buffer[BYTES_PER_PACKET];
@@ -301,20 +292,23 @@ int main(int argc, char** argv)
 	    channels[0] = (void*) lptr;
 	    channels[1] = (void*) rptr;
 
-	    switch(map_type) {
-	    case 0:
-	    case 1:
-		imap_channels(mparam.format,
-			      channels, dst->param.channels_per_frame,
-			      dst->data, channel_map,
-			      frames_per_packet);
+	    switch(chan_ctx.type) {
+	    case ACAST_MAP_PERMUTE:
+	    case ACAST_MAP_ID:
+		permute_ni(mparam.format,
+			   channels, 2,
+			   dst->data, dst->param.channels_per_frame,
+			   chan_ctx.channel_map,
+			   frames_per_packet);
 		break;
-	    case 2:
-		iop_channels(mparam.format,
-			     channels, 2,
-			     dst->data, num_output_channels,
-			     channel_op, num_channel_ops,
-			     frames_per_packet);
+	    case ACAST_MAP_OP:		
+		scatter_gather_ni(mparam.format,
+				  channels, stride,
+				  dst->data, num_output_channels,
+				  chan_ctx.channel_op, chan_ctx.num_channel_ops,
+				  frames_per_packet);
+		break;
+	    case ACAST_MAP_INVALID:
 		break;
 	    }
 		

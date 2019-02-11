@@ -128,9 +128,7 @@ int main(int argc, char** argv)
     int num_output_channels = 0;
     int num_input_channels = 2;
     char* map = CHANNEL_MAP;
-    acast_op_t channel_op[MAX_CHANNEL_OP];
-    uint8_t    channel_map[MAX_CHANNEL_MAP];
-    size_t     num_channel_ops;    
+    acast_channel_ctx_t chan_ctx;
     struct sockaddr_in maddr;
     socklen_t maddrlen;
     struct sockaddr_in iaddr;
@@ -143,7 +141,6 @@ int main(int argc, char** argv)
     tick_t     first_time = 0;
     uint64_t   sent_frames = 0;
     int mode = 0; // SND_PCM_NONBLOCK;
-    int map_type;
     char src_buffer[BYTES_PER_PACKET];
     acast_t* src;
     
@@ -243,21 +240,14 @@ int main(int argc, char** argv)
     acast_setup_param(handle, &iparam, &sparam, &snd_frames_per_packet);
     bytes_per_frame = sparam.bytes_per_channel * sparam.channels_per_frame;
 
-    if ((map_type = parse_channel_map(map,
-				      channel_op, MAX_CHANNEL_OP,
-				      &num_channel_ops,
-				      channel_map, MAX_CHANNEL_MAP,
-				      sparam.channels_per_frame,
-				      &num_output_channels)) < 0) {
+    if (parse_channel_ctx(map,&chan_ctx,sparam.channels_per_frame,
+			  &num_output_channels) < 0) {
 	fprintf(stderr, "map synatx error\n");
 	exit(1);
     }
 
     if (verbose) {
-	printf("Channel map: ");
-	print_channel_ops(channel_op, num_channel_ops);
-	printf("use_channel_map: %d\n", (map_type>0));
-	printf("id_channel_map: %d\n",  (map_type==1));
+	print_channel_ctx(stdout, &chan_ctx);
 	printf("num_output_channels = %d\n", num_output_channels);
     }
 
@@ -363,35 +353,43 @@ int main(int argc, char** argv)
 	    
 	    if (r < frames_per_packet)
 		fprintf(stderr, "acast_read read short bytes\n");
+
+
+	    // FIXME: map src to all client output packets
 	    
-	    switch(map_type) {
-	    case 1:
+	    switch(chan_ctx.type) {
+	    case ACAST_MAP_PERMUTE:
 		dst = (acast_t*) dst_buffer;
 		dst->param = mparam;
-		map_channels(mparam.format,
-			     src->data, sparam.channels_per_frame,
-			     dst->data, num_output_channels, 
-			     channel_map,
-			     frames_per_packet);
+		permute_ii(mparam.format,
+			   src->data, sparam.channels_per_frame,
+			   dst->data, num_output_channels, 
+			   chan_ctx.channel_map,
+			   frames_per_packet);
 		break;
-	    case 2:
+	    case ACAST_MAP_OP:
 		dst = (acast_t*) dst_buffer;
 		dst->param = mparam;
-		op_channels(mparam.format,
-			    src->data, sparam.channels_per_frame,
-			    dst->data, num_output_channels,
-			    channel_op, num_channel_ops,
-			    frames_per_packet);
+		scatter_gather_ii(mparam.format,
+				  src->data, sparam.channels_per_frame,
+				  dst->data, num_output_channels,
+				  chan_ctx.channel_op, chan_ctx.num_channel_ops,
+				  frames_per_packet);
 		break;
-	    case 0:
-	    default:
+	    case ACAST_MAP_ID:
 		dst = src;
 		dst->param = mparam;
 		break;
+	    default:
+		dst = src;		
+		// error
+		break;
 	    }
 	    dst->seqno = seqno++;
-	    dst->num_frames = r;
+	    dst->num_frames = r;	   
 	    bytes_to_send = bytes_per_frame*dst->num_frames;
+
+	    // FIXME: send to each client (add client order to header?)
 	    if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
 		       (struct sockaddr *) &maddr, maddrlen) < 0) {
 		fprintf(stderr, "failed to send frame %s\n",

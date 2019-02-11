@@ -1,7 +1,7 @@
 CFLAGS = -Og  -Wall
 LDFLAGS = -g
 
-OBJS =  acast.o wav.o g711.o tick.o
+OBJS =  acast_channel.o acast.o wav.o g711.o tick.o
 MOBJS = $(OBJS) mp3.o
 
 all: acast_sender acast_receiver mp3_sender mp3_player wav_sender wav_player acast_info
@@ -29,7 +29,8 @@ acast_info: acast_info.o
 
 acast_receiver.o: acast.h
 acast_sender.o: acast.h tick.h
-acast.o: acast.h g711.h
+acast_channel.o: acast_channel.h
+acast.o: acast.h g711.h acast_channel.h
 wav_player.o: acast.h tick.h wav.h
 wav_sender.o: acast.h tick.h wav.h
 mp3_sender.o: acast.h tick.h mp3.h

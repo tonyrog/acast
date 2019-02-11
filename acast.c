@@ -7,6 +7,7 @@
 #include <sched.h>
 
 #include "acast.h"
+#include "acast_channel.h"
 #include "g711.h"
 
 #define DEBUG
@@ -428,625 +429,143 @@ void acast_setscheduler(void)
 	   sched_param.sched_priority);
 }
 
+//
+// import scatter_gather_uint8, scatter_gather_int16, scatter_gather_uint32
+//
+#define TYPE uint8_t
+#define TYPE2 uint16_t
+#include "map.i"
 
-static void map_8(uint8_t* src,
-		  unsigned int src_channels_per_frame,
-		  uint8_t* dst,		     
-		  unsigned int dst_channels_per_frame,
-		  uint8_t* channel_map,
-		  uint32_t frames)
-{
-    while(frames--) {
-	int i;
-	for (i = 0;  i < dst_channels_per_frame; i++)
-	    *dst++ = src[channel_map[i]];
-	src += src_channels_per_frame;
-    }
-}
+#define TYPE int16_t
+#define TYPE2 int32_t
+#include "map.i"
 
-static void map_16(uint16_t* src,
-		   unsigned int src_channels_per_frame,
-		   uint16_t* dst,
-		   unsigned int dst_channels_per_frame,
-		   uint8_t* channel_map,
-		   uint32_t frames)
-{
-    while(frames--) {
-	int i;
-	for (i = 0;  i < dst_channels_per_frame; i++)
-	    *dst++ = src[channel_map[i]];
-	src += src_channels_per_frame;
-    }
-}
-
-static void map_32(uint32_t* src,
-		  unsigned int src_channels_per_frame,
-		  uint32_t* dst,		     
-		  unsigned int dst_channels_per_frame,
-		  uint8_t* channel_map,
-		  uint32_t frames)
-{
-    while(frames--) {
-	int i;
-	for (i = 0;  i < dst_channels_per_frame; i++)
-	    *dst++ = src[channel_map[i]];
-	src += src_channels_per_frame;
-    }
-}
+#define TYPE int32_t
+#define TYPE2 int64_t
+#include "map.i"
 
 // rearrange interleaved channels
 // select channels by channel_map from src and put into dst
-void map_channels(snd_pcm_format_t fmt,
-		  void* src, unsigned int src_channels_per_frame,
-		  void* dst, unsigned int dst_channels_per_frame,
-		  uint8_t* channel_map,
-		  uint32_t frames)
+void permute_ii(snd_pcm_format_t fmt,
+		void* src, size_t nsrc,
+		void* dst, size_t ndst,
+		uint8_t* channel_map,
+		size_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
-	map_8(src, src_channels_per_frame,
-	      dst, dst_channels_per_frame,
-	      channel_map, frames);
+	permute_ii_uint8_t(
+	    (uint8_t*)src, nsrc,
+	    (uint8_t*)dst, ndst,
+	    channel_map, frames);
 	break;
     case 16:
-	map_16((uint16_t*)src, src_channels_per_frame,
-	       (uint16_t*)dst, dst_channels_per_frame,
-	       channel_map, frames);
+	permute_ii_int16_t(
+	    (int16_t*)src, nsrc,
+	    (int16_t*)dst, ndst,
+	    channel_map, frames);
 	break;	
     case 32:
-	map_32((uint32_t*)src, src_channels_per_frame,
-	       (uint32_t*)dst, dst_channels_per_frame,
-	       channel_map, frames);
+	permute_ii_int32_t(	
+	    (int32_t*)src, nsrc,
+	    (int32_t*)dst, ndst,
+	    channel_map, frames);
 	break;
     }
-}
-
-static void imap_8(uint8_t** src,
-		   unsigned int dst_channels_per_frame,
-		   uint8_t* dst,
-		   uint8_t* channel_map,
-		   uint32_t frames)
-{
-    int s, i;
-
-    for (s = 0; s < frames; s++)
-	for (i = 0; i < dst_channels_per_frame; i++)
-	    *dst++ = src[channel_map[i]][s];
-}
-
-static void imap_16(uint16_t** src,
-		    unsigned int dst_channels_per_frame,
-		    uint16_t* dst,
-		    uint8_t* channel_map,
-		    uint32_t frames)
-{
-    int s, i;
-
-    for (s = 0; s < frames; s++)
-	for (i = 0; i < dst_channels_per_frame; i++)
-	    *dst++ = src[channel_map[i]][s];
-}
-
-static void imap_32(uint32_t** src,
-		    unsigned int dst_channels_per_frame,
-		    uint32_t* dst,
-		    uint8_t* channel_map,
-		    uint32_t frames)
-{
-    int s, i;
-
-    for (s = 0; s < frames; s++)
-	for (i = 0; i < dst_channels_per_frame; i++)
-	    *dst++ = src[channel_map[i]][s];
 }
 
 // interleave channels using channel map
-void imap_channels(snd_pcm_format_t fmt,
-			 void** src,
-			 unsigned int dst_channels_per_frame,
-			 void* dst,
-			 uint8_t* channel_map,
-			 uint32_t frames)
+void permute_ni(snd_pcm_format_t fmt,
+		void** src, size_t nsrc,
+		void* dst, size_t ndst,
+		uint8_t* channel_map,
+		size_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
-	imap_8((uint8_t**) src,
-		dst_channels_per_frame,
-		dst, channel_map, frames);
+	permute_ni_uint8_t(
+	    (uint8_t**) src, nsrc,
+	    (uint8_t*) dst, ndst,
+	    channel_map, frames);
 	break;
     case 16:
-	imap_16((uint16_t**) src,
-		 dst_channels_per_frame,
-		 (uint16_t*)dst, channel_map, frames);
+	permute_ni_int16_t(
+	    (int16_t**) src, nsrc,
+	    (int16_t*) dst, ndst,
+	    channel_map, frames);
 	break;
     case 32:
-	imap_32((uint32_t**) src,
-		dst_channels_per_frame,
-		(uint32_t*)dst, channel_map, frames);
+	permute_ni_int32_t(
+	    (int32_t**) src, nsrc,
+	    (int32_t*) dst, ndst,
+	    channel_map, frames);
 	break;
-    }
-}
-
-// fixme: ulaw/alaw
-static inline int16_t sum_u8(uint8_t a, uint8_t b)
-{
-    uint16_t sum = a+b;
-    if (sum > 0xff) return 0xff;
-    return sum;
-}
-
-static inline int16_t diff_u8(uint8_t a, uint8_t b)
-{
-    if (a > b) return 0;
-    return a-b;
-}
-
-static inline int16_t sum_i16(int16_t a, int16_t b)
-{
-    int32_t sum = a+b;
-    if (sum > 0x7fff) return 0x7fff;
-    else if (sum < -0x8000) return -0x8000;
-    return sum;
-}
-
-static inline int16_t diff_i16(int16_t a, int16_t b)
-{
-    int32_t sum = a-b;
-    if (sum > 0x7fff) return 0x7fff;
-    else if (sum < -0x8000) return -0x8000;
-    return sum;
-}
-
-static inline int32_t sum_i32(int32_t a, int32_t b)
-{
-    int64_t sum = a+b;
-    if (sum > 0x7fffffff) return 0x7fffffff;
-    else if (sum < -0x80000000) return -0x80000000;
-    return sum;
-}
-
-static inline int32_t diff_i32(int32_t a, int32_t b)
-{
-    int64_t diff = a-b;
-    if (diff > 0x7fffffff) return 0x7fffffff;
-    else if (diff < -0x80000000) return -0x80000000;
-    return diff;
-}
-
-static void op_u8(uint8_t* src,
-		  unsigned int src_channels_per_frame,
-		  uint8_t* dst,
-		  unsigned int dst_channels_per_frame,
-		  acast_op_t* channel_op,
-		  size_t num_ops,		 
-		  uint32_t frames)
-{
-    while(frames--) {
-	int i;
-	for (i = 0;  i < num_ops; i++) {
-	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1:
-		dst[channel_op[i].dst] = src[channel_op[i].src1];
-		break;
-	    case ACAST_OP_CONST1:
-		dst[channel_op[i].dst] = channel_op[i].src1;
-		break;
-	    case ACAST_OP_ADD:
-		dst[channel_op[i].dst] =
-		    src[channel_op[i].src1] + src[channel_op[i].src2];
-		break;
-	    case ACAST_OP_SUB:
-		dst[channel_op[i].dst] =
-		    src[channel_op[i].src1] - src[channel_op[i].src2];
-	    }
-	}
-	dst += dst_channels_per_frame;	
-	src += src_channels_per_frame;
-    }
-}
-
-static void op_i16(int16_t* src,
-		   unsigned int src_channels_per_frame,
-		   int16_t* dst,		     
-		   unsigned int dst_channels_per_frame,
-		   acast_op_t* channel_op,
-		   size_t num_ops,		 
-		   uint32_t frames)
-{
-    while(frames--) {
-	int i;
-	for (i = 0;  i < num_ops; i++) {
-	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1:
-		dst[channel_op[i].dst] = src[channel_op[i].src1];
-		break;
-	    case ACAST_OP_CONST1:
-		dst[channel_op[i].dst] = channel_op[i].src1;
-		break;
-	    case ACAST_OP_ADD:
-		dst[channel_op[i].dst] =
-		    sum_i16(src[channel_op[i].src1],
-			    src[channel_op[i].src2]);
-		break;
-	    case ACAST_OP_SUB:
-		dst[channel_op[i].dst] =
-		    diff_i16(src[channel_op[i].src1],
-			     src[channel_op[i].src2]);
-		break;
-	    }
-	}
-	dst += dst_channels_per_frame;
-	src += src_channels_per_frame;
-    }
-}
-
-
-static void op_i32(int32_t* src,
-		   unsigned int src_channels_per_frame,
-		   int32_t* dst,		     
-		   unsigned int dst_channels_per_frame,
-		   acast_op_t* channel_op,
-		   size_t num_ops,		 
-		   uint32_t frames)
-{
-    while(frames--) {
-	int i;
-	for (i = 0;  i < num_ops; i++) {
-	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1:
-		dst[channel_op[i].dst] = src[channel_op[i].src1];
-		break;
-	    case ACAST_OP_CONST1:
-		dst[channel_op[i].dst] = channel_op[i].src1;
-		break;
-	    case ACAST_OP_ADD:
-		dst[channel_op[i].dst] =
-		    sum_i32(src[channel_op[i].src1],
-			    src[channel_op[i].src2]);
-		break;
-	    case ACAST_OP_SUB:
-		dst[channel_op[i].dst] =
-		    diff_i32(src[channel_op[i].src1],
-			     src[channel_op[i].src2]);
-	    }
-	}
-	dst += dst_channels_per_frame;	
-	src += src_channels_per_frame;
     }
 }
 
 // rearrange interleaved channels with operation
 // select input channel src1, src2 and put result in output channel dst
 //
-void op_channels(snd_pcm_format_t fmt,
-		 void* src, unsigned int src_channels_per_frame,
-		 void* dst, unsigned int dst_channels_per_frame,
-		 acast_op_t* channel_op, size_t num_ops,
-		 uint32_t frames)
+void scatter_gather_ii(snd_pcm_format_t fmt,
+		       void* src, size_t nsrc,
+		       void* dst, size_t ndst,
+		       acast_op_t* channel_op, size_t num_ops,
+		       size_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
-	op_u8(src, src_channels_per_frame,
-	      dst, dst_channels_per_frame,
-	      channel_op, num_ops,
-	      frames);
+	scatter_gather_ii_uint8_t(
+	    (uint8_t*)src, nsrc,
+	    (uint8_t*)dst, ndst,
+	    channel_op, num_ops,
+	    frames);
 	break;
     case 16:
-	op_i16((int16_t*)src, src_channels_per_frame,
-	       (int16_t*)dst, dst_channels_per_frame,
-	       channel_op, num_ops,
-	       frames);
+	scatter_gather_ii_int16_t(
+	    (int16_t*)src, nsrc,
+	    (int16_t*)dst, ndst,
+	    channel_op, num_ops,
+	    frames);
 	break;	
     case 32:
-	op_i32((int32_t*)src, src_channels_per_frame,
-	       (int32_t*)dst, dst_channels_per_frame,
-	       channel_op, num_ops,	      
-	       frames);
+	scatter_gather_ii_int32_t(
+	    (int32_t*)src, nsrc,
+	    (int32_t*)dst, ndst,
+	    channel_op, num_ops,
+	    frames);
 	break;
-    }
-}
-
-
-
-static void iop_u8(uint8_t** src,
-		   unsigned int src_channels_per_frame,
-		   uint8_t* dst,
-		   unsigned int dst_channels_per_frame,
-		   acast_op_t* channel_op,
-		   size_t num_ops,		 
-		   uint32_t frames)
-{
-    int j;
-    for (j = 0; j < frames; j++) {
-	int i;
-	for (i = 0;  i < num_ops; i++) {
-	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1:
-		dst[channel_op[i].dst] = src[channel_op[i].src1][j];
-		break;
-	    case ACAST_OP_CONST1:
-		dst[channel_op[i].dst] = channel_op[i].src1;
-		break;
-	    case ACAST_OP_ADD:
-		dst[channel_op[i].dst] =
-		    sum_u8(src[channel_op[i].src1][j],
-			   src[channel_op[i].src2][j]);
-		break;
-	    case ACAST_OP_SUB:
-		dst[channel_op[i].dst] =
-		    diff_u8(src[channel_op[i].src1][j],
-			    src[channel_op[i].src2][j]);
-		break;
-	    }
-	}
-	dst += dst_channels_per_frame;	
-    }
-}
-
-static void iop_i16(int16_t** src,
-		    unsigned int src_channels_per_frame,
-		    int16_t* dst,		     
-		    unsigned int dst_channels_per_frame,
-		    acast_op_t* channel_op,
-		    size_t num_ops,		 
-		    uint32_t frames)
-{
-    int j;
-    for (j = 0; j < frames; j++) {    
-	int i;
-	for (i = 0;  i < num_ops; i++) {
-	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1:
-		dst[channel_op[i].dst] = src[channel_op[i].src1][j];
-		break;
-	    case ACAST_OP_CONST1:
-		dst[channel_op[i].dst] = channel_op[i].src1;
-		break;
-	    case ACAST_OP_ADD:
-		dst[channel_op[i].dst] =
-		    sum_i16(src[channel_op[i].src1][j],
-			    src[channel_op[i].src2][j]);
-		break;
-	    case ACAST_OP_SUB:
-		dst[channel_op[i].dst] =
-		    diff_i16(src[channel_op[i].src1][j],
-			     src[channel_op[i].src2][j]);
-	    }
-	}
-	dst += dst_channels_per_frame;
-    }
-}
-
-static void iop_i32(int32_t** src,
-		    unsigned int src_channels_per_frame,
-		    int32_t* dst,		     
-		    unsigned int dst_channels_per_frame,
-		    acast_op_t* channel_op,
-		    size_t num_ops,		 
-		    uint32_t frames)
-{
-    int j;
-    for (j = 0; j < frames; j++) {
-	int i;
-	for (i = 0;  i < num_ops; i++) {
-	    switch(channel_op[i].op) {
-	    case ACAST_OP_SRC1:
-		dst[channel_op[i].dst] = src[channel_op[i].src1][j];
-		break;
-	    case ACAST_OP_CONST1:
-		dst[channel_op[i].dst] = channel_op[i].src1;
-		break;
-	    case ACAST_OP_ADD:
-		dst[channel_op[i].dst] =
-		    sum_i32(src[channel_op[i].src1][j],
-			    src[channel_op[i].src2][j]);
-		break;
-	    case ACAST_OP_SUB:
-		dst[channel_op[i].dst] =
-		    diff_i32(src[channel_op[i].src1][j],
-			     src[channel_op[i].src2][j]);
-	    }	    
-	}
-	dst += dst_channels_per_frame;	
     }
 }
 
 // operate on separate channels in src and result in interleaved channels
 // in dst.
-void iop_channels(snd_pcm_format_t fmt,
-		  void** src, unsigned int src_channels_per_frame,  
-		  void* dst, unsigned int dst_channels_per_frame,
-		  acast_op_t* channel_op, size_t num_ops,
-		  uint32_t frames)
+void scatter_gather_ni(snd_pcm_format_t fmt,
+		       void** src, size_t* src_stride,
+		       void* dst, size_t dst_stride,
+		       acast_op_t* channel_op, size_t num_ops,
+		       size_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
-	iop_u8((uint8_t**)src, src_channels_per_frame,
-	       dst, dst_channels_per_frame,
-	       channel_op, num_ops,
-	       frames);
+	scatter_gather_ni_uint8_t(
+	    (uint8_t**)src, src_stride,
+	    (uint8_t*)dst, dst_stride,
+	    channel_op, num_ops,
+	    frames);
 	break;
     case 16:
-	iop_i16((int16_t**)src, src_channels_per_frame,
-		(int16_t*)dst, dst_channels_per_frame,
-		channel_op, num_ops,
-		frames);
+	scatter_gather_ni_int16_t(
+	    (int16_t**)src, src_stride,
+	    (int16_t*)dst, dst_stride,
+	    channel_op, num_ops,
+	    frames);
 	break;	
     case 32:
-	iop_i32((int32_t**)src, src_channels_per_frame,
-		(int32_t*)dst, dst_channels_per_frame,
-		channel_op, num_ops,	      
-		frames);
+	scatter_gather_ni_int32_t(
+	    (int32_t**)src, src_stride,
+	    (int32_t*)dst, dst_stride,
+	    channel_op, num_ops,	      
+	    frames);
 	break;
     }
-}
-
-
-int parse_channel_ops(char* map, acast_op_t* channel_op, size_t max_ops)
-{
-    int i = 0;
-    char* ptr = map;
-
-    while((i < max_ops) && (*ptr != '\0')) {
-	switch(ptr[0]) {
-	case '+':
-	    if (!isdigit(ptr[1]) || !isdigit(ptr[2]))
-		return -1;
-	    channel_op[i].src1 = ptr[1]-'0';
-	    channel_op[i].src2 = ptr[2]-'0';
-	    channel_op[i].dst  = i;
-	    channel_op[i].op   = ACAST_OP_ADD;
-	    ptr += 3;
-	    break;
-	case '-':
-	    if (!isdigit(ptr[1]) || !isdigit(ptr[2]))
-		return -1;
-	    channel_op[i].src1 = ptr[1]-'0';
-	    channel_op[i].src2 = ptr[2]-'0';
-	    channel_op[i].dst  = i;
-	    channel_op[i].op   = ACAST_OP_SUB;
-	    ptr += 3;
-	    break;
-	    
-	case 'd': {
-	    int v = 0;
-	    int s = 1;
-	    if (ptr[1] == '-') { s = -1; ptr += 2; }
-	    else if (ptr[1] == '+') { s = 1; ptr += 2; }
-	    else ptr += 1;
-	    if (!isdigit(*ptr)) return -1;
-	    while(isdigit(*ptr)) {
-		v = v*10 + (*ptr - '0');
-		ptr++;
-	    }
-	    channel_op[i].src1 = (s < 0) ? -v : v;
-	    channel_op[i].src2 = 0;
-	    channel_op[i].dst  = i;
-	    channel_op[i].op   = ACAST_OP_CONST1;	    
-	    break;
-	}
-
-	case ',':  // separator
-	    ptr++;
-	    continue;
-	    
-	case 'z':
-	    channel_op[i].src1 = 0;
-	    channel_op[i].src2 = 0;
-	    channel_op[i].dst  = i;
-	    channel_op[i].op   = ACAST_OP_CONST1;
-	    ptr++;
-	    break;
-	    
-	default:
-	    if (!isdigit(ptr[0]))
-		return -1;
-	    channel_op[i].src1 = ptr[0]-'0';
-	    channel_op[i].src2 = ptr[0]-'0';
-	    channel_op[i].dst  = i;
-	    channel_op[i].op   = ACAST_OP_SRC1;
-	    ptr++;
-	    break;
-	}
-	i++;
-    }
-    if (*ptr == '\0')
-	return i;
-    return -1;
-}
-
-void print_channel_ops(acast_op_t* channel_op, size_t num_ops)
-{
-    int i;
-    for (i = 0; i < num_ops; i++) {
-	switch(channel_op[i].op) {
-	case ACAST_OP_SRC1:
-	    printf("%d", channel_op[i].src1);
-	    break;
-	case ACAST_OP_CONST1:
-	    printf("d%d", channel_op[i].src1);
-	    break;
-	case ACAST_OP_ADD:
-	    printf("+%d%d", channel_op[i].src1, channel_op[i].src2);
-	    break;
-	case ACAST_OP_SUB:
-	    printf("-%d%d", channel_op[i].src1, channel_op[i].src2);
-	    break;
-	}
-    }
-    printf("\n");
-}
-
-// try build a simple channel map from channel_op if possible
-// return 0 if not possible
-// return 1 if simple id channel_map channel_map[i] = i
-// return 2 if channel_map channel_map[i] = j where i != j for some i,j
-//
-int build_channel_map(acast_op_t* channel_op, size_t num_channel_ops,
-		      uint8_t* channel_map, size_t max_channel_map,
-		      int num_src_channels, int* num_dst_channels)
-{
-    int i;
-    int max_dst_channel = -1;
-    int use_channel_map = 1;
-    int id_channel_map = 1;
-	
-    for (i = 0; (i < num_channel_ops) && (i < max_channel_map); i++) {
-	if (channel_op[i].dst > max_dst_channel)
-	    max_dst_channel = channel_op[i].dst;
-	if ((channel_op[i].dst != i) ||
-	    (channel_op[i].op != ACAST_OP_SRC1)) {
-	    use_channel_map = 0;
-	    id_channel_map = 0;
-	}
-	else if (use_channel_map) {
-	    channel_map[i] = channel_op[i].src1;
-	    if (channel_map[i] != i)
-		id_channel_map = 0;
-	}
-    }
-    if (i >= max_channel_map)
-	use_channel_map = 0;
-	
-    if (*num_dst_channels == 0)
-	*num_dst_channels = max_dst_channel+1;
-    
-    if (*num_dst_channels != num_src_channels)
-	id_channel_map = 0;
-
-    if (use_channel_map && id_channel_map)
-	return 1;
-    else if (use_channel_map)
-	return 2;
-    return 0;
-}
-
-
-int parse_channel_map(char* map,
-		      acast_op_t* channel_op, size_t max_channel_ops,
-		      size_t* num_channel_ops,
-		      uint8_t* channel_map, size_t max_channel_map,
-		      int num_src_channels, int* num_dst_channels)
-{
-    int nc;
-    
-    if (strcmp(map, "auto") == 0) {
-	int i;
-	nc = (*num_dst_channels == 0) ? num_src_channels : *num_dst_channels;
-	if (nc > max_channel_ops) nc = max_channel_ops;
-	for (i = 0; i < nc; i++) {
-	    channel_op[i].op = ACAST_OP_SRC1;
-	    channel_op[i].src1 = i % num_src_channels;
-	    channel_op[i].src2 = 0;
-	    channel_op[i].dst = i;
-	}
-    }
-    else {
-	if ((nc = parse_channel_ops(map, channel_op, max_channel_ops)) < 0)
-	    return -1;
-    }
-    *num_channel_ops = nc;
-    return build_channel_map(channel_op, nc,
-			     channel_map, max_channel_map,
-			     num_src_channels, num_dst_channels);
 }

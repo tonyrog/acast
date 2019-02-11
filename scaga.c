@@ -6,27 +6,9 @@
 
 #include <alsa/asoundlib.h>
 #include "g711.h"
+#include "acast_channel.h"
 
 #define TEST
-
-#define OP_SRC   0
-#define OP_CONST 1
-#define OP_ADD   2
-#define OP_ADDC  3
-
-#define MAP_SRC(i,s1) { .op=OP_SRC, .src1=(s1), .src2 = 0, .dst = (i) }
-#define MAP_CONST(i,v2) { .op=OP_CONST, .src1 = 0, .src2 = (v2), .dst = (i) }
-#define MAP_ADD(i,s1,s2) { .op=OP_ADD, .src1 = (s1), .src2 = (s2), .dst = (i) }
-#define MAP_ADDC(i,s1,v2) { .op=OP_ADD, .src1 = (s1), .src2 = (v2), .dst = (i) }
-
-typedef struct
-{
-  int op;
-  int src1;
-  int src2;
-  int dst;
-} chan_map_t;
-
 
 #define SWAPu16(x) __builtin_bswap16((x))
 #define SWAPu32(x) __builtin_bswap32((x))

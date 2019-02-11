@@ -71,13 +71,10 @@ int main(int argc, char** argv)
     uint32_t num_frames;
     int num_output_channels = 0;
     char* map = CHANNEL_MAP;
-    acast_op_t channel_op[MAX_CHANNEL_OP];
-    uint8_t    channel_map[MAX_CHANNEL_MAP];
-    int        num_channel_ops;
+    acast_channel_ctx_t chan_ctx;
     char       silence_buffer[BYTES_PER_PACKET];
     acast_t*   silence;
     int mode = 0; // SND_PCM_NONBLOCK;
-    int map_type; // 0=id, 1=map, 2=op
     
     while(1) {
 	int option_index = 0;
@@ -155,46 +152,16 @@ int main(int argc, char** argv)
     }
     
 
-	
-    // normally we want to acast 6 channels but now we select the
-    // native wav format for testing
-
-    if (strcmp(map, "auto") == 0) {
-	int i, n;
-
-	n = (num_output_channels == 0) ? wav.NumChannels : num_output_channels;
-	for (i = 0; i < n; i++) {
-	    channel_op[i].op = ACAST_OP_SRC1;
-	    channel_op[i].src1 = i % wav.NumChannels;
-	    channel_op[i].src2 = 0;
-	    channel_op[i].dst = i;
-	}
-	num_channel_ops = n;
-    }
-    else {
-	if ((num_channel_ops = parse_channel_ops(map, channel_op,
-						 MAX_CHANNEL_OP)) < 0) {
-	    fprintf(stderr, "map synatx error\n");
-	    exit(1);
-	}
-    }
-
-    if ((map_type = build_channel_map(channel_op, num_channel_ops,
-				      channel_map, MAX_CHANNEL_MAP,
-				      wav.NumChannels,
-				      &num_output_channels)) < 0) {
+    if (parse_channel_ctx(map,&chan_ctx,wav.NumChannels,
+			  &num_output_channels) < 0) {
 	fprintf(stderr, "map synatx error\n");
 	exit(1);
-    }	
+    }
 	
     if (verbose) {
-	printf("Channel map: ");
-	print_channel_ops(channel_op, num_channel_ops);
-	printf("  use_channel_map = %d\n", (map_type > 0));
-	printf("  id_channel_map = %d\n",  (map_type == 1));
-	printf("  num_output_channels = %d\n", num_output_channels);
+	print_channel_ctx(stdout, &chan_ctx);
+	printf("num_output_channels = %d\n", num_output_channels);
     }
-
 
     if ((fmt = wav_to_snd(wav.AudioFormat, wav.BitsPerChannel)) ==
 	SND_PCM_FORMAT_UNKNOWN) {
@@ -219,7 +186,7 @@ int main(int argc, char** argv)
     if (verbose) {
 	fprintf(stderr, "snd params:\n");
 	acast_print_params(stderr, &sparam);
-	fprintf(stderr, "  snd_bytes_per_frame = %d\n",
+	fprintf(stderr, "  snd_bytes_per_frame = %lu\n",
 		snd_bytes_per_frame);
 	fprintf(stderr, "  snd_frames_per_packet = %lu\n",
 		snd_frames_per_packet);
@@ -238,7 +205,7 @@ int main(int argc, char** argv)
 
     if (verbose) {
 	fprintf(stderr, "  num_output_channels = %d\n", num_output_channels);
-	fprintf(stderr, "  bytes_per_frame = %d\n",  bytes_per_frame);
+	fprintf(stderr, "  bytes_per_frame = %lu\n",  bytes_per_frame);
 	fprintf(stderr, "  frames_per_packet = %lu\n", frames_per_packet);
     }
 
@@ -256,29 +223,33 @@ int main(int argc, char** argv)
 	    exit(1);
 	}
 
-	switch(map_type) {
-	case 1:
+	switch(chan_ctx.type) {	
+	case ACAST_MAP_PERMUTE:
 	    dst = (acast_t*) dst_buffer;
 	    dst->param = sparam;
-	    map_channels(sparam.format,
-			 src->data, wav.NumChannels,
-			 dst->data, num_output_channels, 
-			 channel_map,
-			 frames_per_packet);
+	    permute_ii(sparam.format,
+		       src->data, wav.NumChannels,
+		       dst->data, num_output_channels, 
+		       chan_ctx.channel_map,
+		       frames_per_packet);
 	    break;
-	case 2:
+	case ACAST_MAP_OP:
 	    dst = (acast_t*) dst_buffer;
 	    dst->param = sparam;
-	    op_channels(sparam.format,
-			src->data, wav.NumChannels,
-			dst->data, num_output_channels,
-			channel_op, num_channel_ops,
-			frames_per_packet);
+	    scatter_gather_ii(sparam.format,
+			      src->data, wav.NumChannels,
+			      dst->data, num_output_channels,
+			      chan_ctx.channel_op, chan_ctx.num_channel_ops,
+			      frames_per_packet);
 	    break;
-	case 0:
-	default:
+	case ACAST_MAP_ID:
 	    dst = src;
 	    dst->param = sparam;
+	    break;
+	default:
+	    // error
+	    dst = src;
+	    dst->param = sparam;	    
 	    break;
 	}
 	if (num_frames < MAX_U_32_NUM)
