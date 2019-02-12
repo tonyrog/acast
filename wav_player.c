@@ -1,7 +1,7 @@
 //
-//  wav_sender
+//  acast_player
 //
-//     open a wav file and play data samples
+//     play audio files
 //
 
 #include <stdio.h>
@@ -17,7 +17,6 @@
 #include "acast.h"
 #include "acast_file.h"
 #include "tick.h"
-#include "wav.h"
 
 #define PLAYBACK_DEVICE "default"
 #define NUM_CHANNELS   2
@@ -36,7 +35,7 @@ int debug = 0;
 
 void help(void)
 {
-printf("usage: wav_player [options] file\n"
+printf("usage: acast_player [options] file\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
 "  -D, --debug     debug verbosity\n"
@@ -132,7 +131,6 @@ int main(int argc, char** argv)
 	exit(1);
     }
 
-    // max number of packets from wav format
     af_frames_per_packet =
 	acast_file_frames_per_buffer(af,BYTES_PER_PACKET-sizeof(acast_t));
 
