@@ -476,7 +476,7 @@ void permute_ii(snd_pcm_format_t fmt,
 
 // interleave channels using channel map
 void permute_ni(snd_pcm_format_t fmt,
-		void** src, size_t nsrc,
+		void** src, size_t* src_stride, size_t nsrc,
 		void* dst, size_t ndst,
 		uint8_t* channel_map,
 		size_t frames)
@@ -484,19 +484,19 @@ void permute_ni(snd_pcm_format_t fmt,
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
 	permute_ni_uint8_t(
-	    (uint8_t**) src, nsrc,
+	    (uint8_t**) src, src_stride, nsrc,
 	    (uint8_t*) dst, ndst,
 	    channel_map, frames);
 	break;
     case 16:
 	permute_ni_int16_t(
-	    (int16_t**) src, nsrc,
+	    (int16_t**) src, src_stride, nsrc,
 	    (int16_t*) dst, ndst,
 	    channel_map, frames);
 	break;
     case 32:
 	permute_ni_int32_t(
-	    (int32_t**) src, nsrc,
+	    (int32_t**) src, src_stride, nsrc,
 	    (int32_t*) dst, ndst,
 	    channel_map, frames);
 	break;
@@ -507,31 +507,31 @@ void permute_ni(snd_pcm_format_t fmt,
 // select input channel src1, src2 and put result in output channel dst
 //
 void scatter_gather_ii(snd_pcm_format_t fmt,
-		       void* src, size_t nsrc,
-		       void* dst, size_t ndst,
-		       acast_op_t* channel_op, size_t num_ops,
+		       void* src, size_t src_stride,
+		       void* dst, size_t dst_stride,
+		       acast_op_t* map, size_t nmap,
 		       size_t frames)
 {
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
 	scatter_gather_ii_uint8_t(
-	    (uint8_t*)src, nsrc,
-	    (uint8_t*)dst, ndst,
-	    channel_op, num_ops,
+	    (uint8_t*)src, src_stride,
+	    (uint8_t*)dst, dst_stride,
+	    map, nmap,
 	    frames);
 	break;
     case 16:
 	scatter_gather_ii_int16_t(
-	    (int16_t*)src, nsrc,
-	    (int16_t*)dst, ndst,
-	    channel_op, num_ops,
+	    (int16_t*)src, src_stride,
+	    (int16_t*)dst, dst_stride,
+	    map, nmap,
 	    frames);
 	break;	
     case 32:
 	scatter_gather_ii_int32_t(
-	    (int32_t*)src, nsrc,
-	    (int32_t*)dst, ndst,
-	    channel_op, num_ops,
+	    (int32_t*)src, src_stride,
+	    (int32_t*)dst, dst_stride,
+	    map, nmap,
 	    frames);
 	break;
     }
@@ -540,7 +540,7 @@ void scatter_gather_ii(snd_pcm_format_t fmt,
 // operate on separate channels in src and result in interleaved channels
 // in dst.
 void scatter_gather_ni(snd_pcm_format_t fmt,
-		       void** src, size_t* src_stride,
+		       void** src, size_t* src_stride, size_t nsrc,
 		       void* dst, size_t dst_stride,
 		       acast_op_t* channel_op, size_t num_ops,
 		       size_t frames)
@@ -548,22 +548,53 @@ void scatter_gather_ni(snd_pcm_format_t fmt,
     switch(snd_pcm_format_physical_width(fmt)) {
     case 8:
 	scatter_gather_ni_uint8_t(
-	    (uint8_t**)src, src_stride,
+	    (uint8_t**)src, src_stride, nsrc,
 	    (uint8_t*)dst, dst_stride,
 	    channel_op, num_ops,
 	    frames);
 	break;
     case 16:
 	scatter_gather_ni_int16_t(
-	    (int16_t**)src, src_stride,
+	    (int16_t**)src, src_stride, nsrc,
 	    (int16_t*)dst, dst_stride,
 	    channel_op, num_ops,
 	    frames);
 	break;	
     case 32:
 	scatter_gather_ni_int32_t(
-	    (int32_t**)src, src_stride,
+	    (int32_t**)src, src_stride, nsrc,
 	    (int32_t*)dst, dst_stride,
+	    channel_op, num_ops,	      
+	    frames);
+	break;
+    }
+}
+
+void scatter_gather_nn(snd_pcm_format_t fmt,
+		       void** src, size_t* src_stride, size_t nsrc,
+		       void** dst, size_t* dst_stride, size_t ndst,
+		       acast_op_t* channel_op, size_t num_ops,
+		       size_t frames)
+{
+    switch(snd_pcm_format_physical_width(fmt)) {
+    case 8:
+	scatter_gather_nn_uint8_t(
+	    (uint8_t**)src, src_stride, nsrc,
+	    (uint8_t**)dst, dst_stride, ndst,
+	    channel_op, num_ops,
+	    frames);
+	break;
+    case 16:
+	scatter_gather_nn_int16_t(
+	    (int16_t**)src, src_stride, nsrc,
+	    (int16_t**)dst, dst_stride, ndst,
+	    channel_op, num_ops,
+	    frames);
+	break;	
+    case 32:
+	scatter_gather_nn_int32_t(
+	    (int32_t**)src, src_stride, nsrc,
+	    (int32_t**)dst, dst_stride, ndst,
 	    channel_op, num_ops,	      
 	    frames);
 	break;

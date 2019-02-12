@@ -28,6 +28,8 @@
 
 #define MAX_CHANNELS 16
 
+#define MAX_U_32_NUM    0xFFFFFFFF
+
 typedef struct
 {
     int8_t   format;   // snd_pcm_format_t (allow UNKNOWN =-1 to be passed)
@@ -91,13 +93,19 @@ extern void permute_ii(snd_pcm_format_t fmt,
 		       size_t frames);
 
 extern void permute_ni(snd_pcm_format_t fmt,
-		       void** src, size_t nsrc,
+		       void** src, size_t* src_stride, size_t nsrc,
 		       void* dst, size_t ndst,
 		       uint8_t* channel_map,
 		       size_t frames);
 
+extern void scatter_gather_nn(snd_pcm_format_t fmt,
+			      void** src, size_t* src_stride, size_t nsrc,
+			      void** dst, size_t* dst_stride, size_t ndst,
+			      acast_op_t* map, size_t nmao,
+			      size_t frames);
+
 extern void scatter_gather_ni(snd_pcm_format_t fmt,
-			      void** src, size_t* src_stride,
+			      void** src, size_t* src_stride, size_t nsrc,
 			      void* dst, size_t dst_stride,
 			      acast_op_t* channel_op, size_t num_ops,
 			      size_t frames);

@@ -32,7 +32,7 @@ static void CAT2(permute_ii_,TYPE)
 
 
 static void CAT2(permute_ni_,TYPE)
-    (TYPE** src, size_t nsrc,
+    (TYPE** src, size_t* src_stride, size_t nsrc,
      TYPE* dst,	size_t ndst,
      uint8_t* channel_map,
      uint32_t frames)
@@ -40,72 +40,69 @@ static void CAT2(permute_ni_,TYPE)
 
     int i;
     TYPE* src1[nsrc];
-    
+
     for (i = 0; i < nsrc; i++) { src1[i] = src[i]; }
 
     while(frames--) {
 	for (i = 0; i < ndst; i++)
 	    *dst++ = *src1[channel_map[i]];
-	for (i = 0; i < nsrc; i++) { src1[i]++; }
+	for (i = 0; i < nsrc; i++) { src1[i] += src_stride[i]; }
     }
 }
 
 // general case where vectors are unreleated
 
-static void CAT2(scatter_gather_,TYPE)
-    (TYPE** src, size_t* src_stride,
-     TYPE** dst, size_t* dst_stride,
+static void CAT2(scatter_gather_nn_,TYPE)
+    (TYPE** src, size_t* src_stride, size_t nsrc,
+     TYPE** dst, size_t* dst_stride, size_t ndst,
      acast_op_t* map,  size_t nmap,
-     size_t nsamples)
+     size_t frames)
 {
     int i;
+    TYPE* src1[nsrc];
+    TYPE* dst1[nsrc];
 
-    for (i = 0; i < nsamples; i++) {
-	int j;
-	for (j = 0; j < nmap; j++) {
-	    int s1, s2, d;
+    for (i = 0; i < nsrc; i++) { src1[i] = src[i]; }
+    for (i = 0; i < ndst; i++) { dst1[i] = dst[i]; }
+
+    while(frames--) {
+	for (i = 0; i < nmap; i++) {
 	    TYPE v1, v2;
-	    switch(map[j].op) {
+	    switch(map[i].op) {
 	    case ACAST_OP_SRC:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
+		v1 = *src1[map[i].src1];
 		break;
 	    case ACAST_OP_CONST:
-		v1 = map[j].src2;
+		v1 = map[i].src2;
 		break;
 	    case ACAST_OP_ADD:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		s2 = map[j].src2;
-		v2 = src[s2][src_stride[s2]*i];
+		v1 = *src1[map[i].src1];
+		v2 = *src1[map[i].src2];
 		v1 = CAT2(sum_,TYPE)(v1,v2);
 		break;
 	    case ACAST_OP_ADDC:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		v2 = map[j].src2;
+		v1 = *src1[map[i].src1];
+		v2 = map[i].src2;
 		v1 = CAT2(sum_,TYPE)(v1,v2);
 		break;
 	    case ACAST_OP_SUB:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		s2 = map[j].src2;
-		v2 = src[s2][src_stride[s2]*i];
+		v1 = *src1[map[i].src1];
+		v2 = *src1[map[i].src2];
 		v1 = CAT2(diff_,TYPE)(v1,v2);
 		break;
 	    case ACAST_OP_SUBC:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		v2 = map[j].src2;
+		v1 = *src1[map[i].src1];
+		v2 = map[i].src2;
 		v1 = CAT2(diff_,TYPE)(v1,v2);
 		break;
 	    default:
 		v1 = 0;
 		break;
 	    }
-	    d = map[j].dst;
-	    dst[d][dst_stride[d]*i] = v1;
+	    *dst1[map[i].dst] = v1;
 	}
+	for (i = 0; i < nsrc; i++) { src1[i] += src_stride[i]; }
+	for (i = 0; i < ndst; i++) { dst1[i] += dst_stride[i]; }	
     }
 }
 
@@ -114,9 +111,9 @@ static void CAT2(scatter_gather_ii_,TYPE)
     (TYPE* src, size_t src_stride,
      TYPE* dst, size_t dst_stride,
      acast_op_t* map, size_t nmap,
-     size_t nsamples)
+     size_t frames)
 {
-    while(nsamples--) {
+    while(frames--) {
 	int j;
 	for (j = 0;  j < nmap; j++) {
 	    TYPE v;
@@ -152,57 +149,53 @@ static void CAT2(scatter_gather_ii_,TYPE)
 
 // case where destination is interleaved ectors are grouped
 static void CAT2(scatter_gather_ni_,TYPE)
-    (TYPE** src, size_t* src_stride,
+    (TYPE** src, size_t* src_stride, size_t nsrc,
      TYPE* dst, size_t dst_stride,
      acast_op_t* map,  size_t nmap,
-     size_t nsamples)
+     size_t frames)
 {
     int i;
-    for (i = 0; i < nsamples; i++) {
-	int j;
-	for (j = 0; j < nmap; j++) {
-	    int s1, s2;
+    TYPE* src1[nsrc];
+    
+    for (i = 0; i < nsrc; i++) { src1[i] = src[i]; }
+
+    while(frames--) {
+	for (i = 0; i < nmap; i++) {
 	    TYPE v1, v2;
-	    switch(map[j].op) {
+	    switch(map[i].op) {
 	    case ACAST_OP_SRC:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
+		v1 = *src1[map[i].src1];
 		break;
 	    case ACAST_OP_CONST:
-		v1 = map[j].src2;
+		v1 = map[i].src2;
 		break;
 	    case ACAST_OP_ADD:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		s2 = map[j].src2;
-		v2 = src[s2][src_stride[s2]*i];
+		v1 = *src1[map[i].src1];
+		v2 = *src1[map[i].src2];
 		v1 = CAT2(sum_,TYPE)(v1,v2);
 		break;
 	    case ACAST_OP_ADDC:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		v2 = map[j].src2;
+		v1 = *src1[map[i].src1];
+		v2 = map[i].src2;
 		v1 = CAT2(sum_,TYPE)(v1,v2);
 		break;
 	    case ACAST_OP_SUB:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		s2 = map[j].src2;
-		v2 = src[s2][src_stride[s2]*i];
+		v1 = *src1[map[i].src1];
+		v2 = *src1[map[i].src2];
 		v1 = CAT2(diff_,TYPE)(v1,v2);
 		break;
 	    case ACAST_OP_SUBC:
-		s1 = map[j].src1;
-		v1 = src[s1][src_stride[s1]*i];
-		v2 = map[j].src2;
+		v1 = *src1[map[i].src1];
+		v2 = map[i].src2;
 		v1 = CAT2(diff_,TYPE)(v1,v2);
 		break;
 	    default:
 		v1 = 0;
 		break;
 	    }
-	    dst[map[j].dst] = v1;
+	    dst[map[i].dst] = v1;
 	}
+	for (i = 0; i < nsrc; i++) { src1[i] += src_stride[i]; }
 	dst += dst_stride;
     }
 }

@@ -1,28 +1,28 @@
 CFLAGS = -Og  -Wall
 LDFLAGS = -g
 
-OBJS =  acast_channel.o acast.o wav.o g711.o tick.o
-MOBJS = $(OBJS) mp3.o
+OBJS =  acast_channel.o acast_file.o acast.o wav.o g711.o tick.o mp3.o
+LIBS = -lmp3lame -lasound
 
 all: acast_sender acast_receiver mp3_sender mp3_player wav_sender wav_player acast_info
 
 acast_sender:	acast_sender.o $(OBJS)
-	$(CC) -o$@ $(LDFLAGS) acast_sender.o $(OBJS) -lasound
+	$(CC) -o$@ $(LDFLAGS) acast_sender.o $(OBJS) $(LIBS)
 
-mp3_sender:	mp3_sender.o $(MOBJS)
-	$(CC) -o$@ $(LDFLAGS) mp3_sender.o $(MOBJS) -lmp3lame -lasound
+mp3_sender:	mp3_sender.o $(OBJS)
+	$(CC) -o$@ $(LDFLAGS) mp3_sender.o $(OBJS) $(LIBS)
 
-mp3_player:	mp3_player.o $(MOBJS)
-	$(CC) -o$@ $(LDFLAGS) mp3_player.o $(MOBJS) -lmp3lame -lasound
+mp3_player:	mp3_player.o $(OBJS)
+	$(CC) -o$@ $(LDFLAGS) mp3_player.o $(OBJS) $(LIBS)
 
 wav_sender:	wav_sender.o $(OBJS)
-	$(CC) -o$@ $(LDFLAGS) wav_sender.o $(OBJS) -lasound
+	$(CC) -o$@ $(LDFLAGS) wav_sender.o $(OBJS) $(LIBS)
 
 wav_player:	wav_player.o $(OBJS)
-	$(CC) -o$@ $(LDFLAGS) wav_player.o $(OBJS) -lasound
+	$(CC) -o$@ $(LDFLAGS) wav_player.o $(OBJS) $(LIBS)
 
 acast_receiver:	acast_receiver.o $(OBJS)
-		$(CC) -o$@ $(LDFLAGS) acast_receiver.o $(OBJS) -lasound
+		$(CC) -o$@ $(LDFLAGS) acast_receiver.o $(OBJS) $(LIBS)
 
 acast_info: acast_info.o
 	$(CC) -o$@ acast_info.o -lasound

@@ -293,14 +293,14 @@ int main(int argc, char** argv)
 	    case ACAST_MAP_PERMUTE:
 	    case ACAST_MAP_ID:
 		permute_ni(mparam.format,
-			   channels, 2,
+			   channels, stride, 2,
 			   dst->data, dst->param.channels_per_frame,
 			   chan_ctx.channel_map,
 			   frames_per_packet);
 		break;
 	    case ACAST_MAP_OP:		
 		scatter_gather_ni(mparam.format,
-				  channels, stride,
+				  channels, stride, 2, 
 				  dst->data, num_output_channels,
 				  chan_ctx.channel_op, chan_ctx.num_channel_ops,
 				  frames_per_packet);

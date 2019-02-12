@@ -191,9 +191,7 @@ int main(int argc, char** argv)
     }
     
     if (verbose > 1) {
-	mp3_print(stderr, &mp3);
-	fprintf(stderr, "enc_delay=%d\n", enc_delay);
-	fprintf(stderr, "enc_padding=%d\n", enc_padding);
+
     }
 
     fmt = SND_PCM_FORMAT_S16_LE;
@@ -263,14 +261,14 @@ int main(int argc, char** argv)
 	    case ACAST_MAP_PERMUTE:
 	    case ACAST_MAP_ID:
 		permute_ni(sparam.format,
-			   channels, sparam.channels_per_frame,
+			   channels, stride, 2,
 			   dst->data, num_output_channels,
 			   chan_ctx.channel_map,
 			   frames_per_packet);
 		break;
 	    case ACAST_MAP_OP:
 		scatter_gather_ni(sparam.format,
-				  channels, stride,
+				  channels, stride, 2, 
 				  dst->data, num_output_channels,
 				  chan_ctx.channel_op, chan_ctx.num_channel_ops,
 				  frames_per_packet);

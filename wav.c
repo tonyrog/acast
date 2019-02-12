@@ -8,8 +8,6 @@ typedef struct
     xwav_header_t xwav;
 } wav_file_private_t;
     
-#define MAX_U_32_NUM    0xFFFFFFFF
-
 snd_pcm_format_t wav_to_snd(uint16_t format, int bits_per_channel)
 {
     switch(format) {
@@ -194,6 +192,15 @@ static int af_close(struct _acast_file_t* af)
     return r;
 }
 
+static void af_print(struct _acast_file_t* af, FILE* f)
+{
+    wav_file_private_t* private = af->private;
+    wav_print(f, &private->wav);
+    if (private->wav.AudioFormat == private->xwav.AudioFormat)
+	xwav_print(f, &private->xwav);
+}
+
+
 acast_file_t* wav_file_open(char* filename, int mode)
 {
     int fd;
@@ -228,9 +235,14 @@ acast_file_t* wav_file_open(char* filename, int mode)
     af->fd = fd;
     af->private = private;
     af->num_frames = num_frames;
+    af->param.format = wav_to_snd(wav.AudioFormat, wav.BitsPerChannel);
+    af->param.channels_per_frame = wav.NumChannels;
+    af->param.bits_per_channel = wav.BitsPerChannel;
+    af->param.bytes_per_channel = (wav.BitsPerChannel+7)/8;
+    af->param.sample_rate = wav.SampleRate;
     af->read = af_read;
     af->write = af_write;
     af->close = af_close;
+    af->print = af_print;
     return af;
 }
-

@@ -278,6 +278,14 @@ static int af_close(struct _acast_file_t* af)
     return r;
 }
 
+static void af_print(struct _acast_file_t* af, FILE* f)
+{
+    mp3_file_private_t* private = af->private;
+    mp3_print(f, &private->mp3);
+    fprintf(f, "enc_delay=%d\n", private->enc_delay);
+    fprintf(f, "enc_padding=%d\n", private->enc_padding);
+}
+
 acast_file_t* mp3_file_open(char* filename, int mode)
 {
     int fd;
@@ -320,10 +328,17 @@ acast_file_t* mp3_file_open(char* filename, int mode)
     
     af->fd = fd;
     af->private = private;
-    af->num_frames = 0;    // unknown
+    af->num_frames = MAX_U_32_NUM;
+    // setup format
+    af->param.format = SND_PCM_FORMAT_S16_LE;
+    af->param.channels_per_frame = mp3.stereo;
+    af->param.bits_per_channel = 16;
+    af->param.bytes_per_channel = 2;
+    af->param.sample_rate = mp3.samplerate;
     af->read = af_read;
     af->write = af_write;
     af->close = af_close;
+    af->print = af_print;
     return af;
 }
 
