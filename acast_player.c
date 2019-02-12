@@ -12,8 +12,6 @@
 #include <getopt.h>
 #include <sys/types.h>
 
-#include <lame/lame.h>
-
 #include "acast.h"
 #include "acast_file.h"
 #include "tick.h"
@@ -124,7 +122,6 @@ int main(int argc, char** argv)
     time_tick_init();    
 
     filename = argv[optind];
-
     if ((af = acast_file_open(filename, O_RDONLY)) == NULL) {
 	fprintf(stderr, "error: unable to open %s: %s\n",
 		filename, strerror(errno));

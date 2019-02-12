@@ -1,8 +1,7 @@
 //
-//  mp3_sender
+//  afile_sender
 //
-//     open a mp3 file and read data samples
-//     and multicast over ip (ttl = 1)
+//   open an audio file and send samples over udp/unicast/multicast (ttl=1)
 //
 
 #include <stdio.h>
@@ -15,11 +14,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include <lame/lame.h>
-
 #include "acast.h"
+#include "acast_file.h"
 #include "tick.h"
-#include "mp3.h"
 
 // ttl=0 local host, ttl=1 local network
 #define MULTICAST_TTL  1
@@ -27,35 +24,16 @@
 #define NUM_CHANNELS   0
 #define CHANNEL_MAP   "auto"
 
-#define MAX_U_32_NUM    0xFFFFFFFF
-#define MP3BUFFER_SIZE  4096
-#define MP3TAG_SIZE     4096
 #define PCM_BUFFER_SIZE 1152
-
-int in_id3v2_size = -1;
-uint8_t* in_id3v2_tag = NULL;
+#define BYTES_PER_BUFFER ((PCM_BUFFER_SIZE*2*2)+sizeof(acast_t))
 
 int verbose = 0;
 int debug = 0;
 
-void emit_message(const char* format, va_list ap)
-{
-    vfprintf(stderr, format, ap);
-}
-
-void emit_error(const char* format, va_list ap)
-{
-    vfprintf(stderr, format, ap);
-}
-
-void emit_debug(const char* format, va_list ap)
-{
-    vfprintf(stderr, format, ap);
-}
 
 void help(void)
 {
-printf("usage: mp3_sender [options] file\n"
+printf("usage: afile_sender [options] file\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
 "  -D, --debug     debug verbosity\n"              
@@ -80,6 +58,7 @@ int main(int argc, char** argv)
 {
     char* filename;
     acast_params_t mparam;
+    snd_pcm_uframes_t af_frames_per_packet;    
     snd_pcm_uframes_t frames_per_packet;    
     uint32_t seqno = 0;
     int sock;
@@ -91,26 +70,23 @@ int main(int argc, char** argv)
     char* unicast_addr   = NULL;    
     struct sockaddr_in addr;
     socklen_t addrlen;
-    hip_t hip;
-    snd_pcm_format_t fmt;    
-    mp3data_struct mp3;
-    int16_t pcm_l[2*PCM_BUFFER_SIZE];
-    int16_t pcm_r[2*PCM_BUFFER_SIZE];
-    int pcm_remain;
-    int fd;
+    uint8_t src_buffer[BYTES_PER_BUFFER];
+    uint8_t dst_buffer[2*BYTES_PER_BUFFER];
+    uint8_t* dst_ptr;
+    int frames_remain;
     int num_frames;
-    int enc_delay, enc_padding;
     int num_output_channels = NUM_CHANNELS;
     char* map = CHANNEL_MAP;
     acast_channel_ctx_t chan_ctx;
     size_t bytes_per_frame;
-    size_t bytes_to_send;    
     size_t network_bufsize = 4*BYTES_PER_PACKET;
     tick_t last_time;
     tick_t first_time = 0;
     tick_t send_time = 0;
     uint64_t frame_delay_us;  // delay per frame in us
     uint64_t sent_frames;     // number of frames sent
+    acast_file_t* af;
+    acast_buffer_t abuf;
     
     while(1) {
 	int option_index = 0;
@@ -185,31 +161,27 @@ int main(int argc, char** argv)
 	help();
 	exit(1);
     }
+
+    time_tick_init();    
     
     filename = argv[optind];
-    if ((fd = open(filename, O_RDONLY)) < 0) {
+    if ((af = acast_file_open(filename, O_RDONLY)) == NULL) {
 	fprintf(stderr, "error: unable to open %s: %s\n",
 		filename, strerror(errno));
 	exit(1);
     }
 
-    time_tick_init();
-    
-    if ((hip = hip_decode_init()) == NULL) {
-	perror("hip_decode_init");
-	exit(1);
+    af_frames_per_packet =
+	acast_file_frames_per_buffer(af,BYTES_PER_PACKET-sizeof(acast_t));    
+
+    if (verbose > 1) {
+	acast_file_print(af, stderr);
+	fprintf(stderr, "  af_frames_per_packet = %lu\n",
+		af_frames_per_packet);
     }
 
-    hip_set_msgf(hip, verbose ? emit_message : 0);
-    hip_set_errorf(hip, verbose ? emit_error : 0);
-    hip_set_debugf(hip, emit_debug);
-
-    if (mp3_decode_init(fd, hip, &mp3, &enc_delay, &enc_padding) < 0) {
-	fprintf(stderr, "failed detect mp3 file format\n");
-	exit(1);
-    }
-
-    if (parse_channel_ctx(map,&chan_ctx,mp3.stereo,&num_output_channels)<0) {
+    if (parse_channel_ctx(map,&chan_ctx,af->param.channels_per_frame,
+			  &num_output_channels) < 0) {
 	fprintf(stderr, "map synatx error\n");
 	exit(1);
     }
@@ -218,14 +190,12 @@ int main(int argc, char** argv)
 	print_channel_ctx(stdout, &chan_ctx);
 	printf("num_output_channels = %d\n", num_output_channels);
     }    
-    
-    if (verbose > 1) {
-	mp3_print(stderr, &mp3);
-	fprintf(stderr, "enc_delay=%d\n", enc_delay);
-	fprintf(stderr, "enc_padding=%d\n", enc_padding);
-    }
 
-    fmt = SND_PCM_FORMAT_S16_LE;
+    if (af->param.format == SND_PCM_FORMAT_UNKNOWN) {
+	fprintf(stderr, "unsupport audio format\n");
+	exit(1);
+    }
+    
     sent_frames = 0;
 
     if (unicast_addr != NULL) {
@@ -251,12 +221,10 @@ int main(int argc, char** argv)
 	    exit(1);
 	}
     }
-    
-    mparam.format = fmt;
-    mparam.sample_rate = mp3.samplerate;
+
+    mparam = af->param;
     mparam.channels_per_frame = num_output_channels;
-    mparam.bits_per_channel = snd_pcm_format_width(fmt);
-    mparam.bytes_per_channel = snd_pcm_format_physical_width(fmt) / 8;
+    
     bytes_per_frame = mparam.bytes_per_channel*mparam.channels_per_frame;
     frames_per_packet = acast_get_frames_per_packet(&mparam);
     frame_delay_us = (frames_per_packet*1000000) / mparam.sample_rate;
@@ -265,62 +233,60 @@ int main(int argc, char** argv)
 	acast_print_params(stderr, &mparam);
 	fprintf(stderr, "frames_per_packet=%ld\n", frames_per_packet);
     }
+	
+    frames_remain = 0;  // samples that remain from last round
+    dst_ptr = dst_buffer;
     
-    pcm_remain = 0;  // samples that remain from last round
-
     last_time = time_tick_now();
     
-    while((num_frames = mp3_decode(fd, hip,
-				   &pcm_l[pcm_remain],
-				   &pcm_r[pcm_remain], &mp3)) > 0) {
-	void* channels[2];
-	size_t stride[2] = {1, 1};
-	int16_t *lptr = pcm_l;
-	int16_t *rptr = pcm_r;
-	char dst_buffer[BYTES_PER_PACKET];
-	acast_t* dst;	
+    while((num_frames = acast_file_read(af, &abuf, src_buffer,
+					BYTES_PER_BUFFER-sizeof(acast_t),
+					frames_per_packet)) > 0) {
 
-	num_frames += pcm_remain;
-
-	dst = (acast_t*) dst_buffer;
-	dst->param = mparam;
+	// convert all frames 
+	switch(chan_ctx.type) {
+	case ACAST_MAP_ID:	
+	case ACAST_MAP_PERMUTE:
+	    permute_ni(mparam.format,
+		       abuf.data, abuf.stride, abuf.size,
+		       dst_ptr, num_output_channels,
+		       chan_ctx.channel_map,
+		       num_frames);
+	    break;
+	case ACAST_MAP_OP:
+	    scatter_gather_ni(mparam.format,
+			      abuf.data, abuf.stride, abuf.size,
+			      dst_ptr, num_output_channels,
+			      chan_ctx.channel_op, chan_ctx.num_channel_ops,
+			      num_frames);
+	    break;
+	default:
+	    fprintf(stderr, "bad ctx type %d\n", chan_ctx.type);
+	    exit(1);		
+	}
 	
-	while(num_frames >= frames_per_packet) {
-	    channels[0] = (void*) lptr;
-	    channels[1] = (void*) rptr;
+	num_frames += frames_remain;
 
-	    switch(chan_ctx.type) {
-	    case ACAST_MAP_PERMUTE:
-	    case ACAST_MAP_ID:
-		permute_ni(mparam.format,
-			   channels, stride, 2,
-			   dst->data, dst->param.channels_per_frame,
-			   chan_ctx.channel_map,
-			   frames_per_packet);
-		break;
-	    case ACAST_MAP_OP:		
-		scatter_gather_ni(mparam.format,
-				  channels, stride, 2, 
-				  dst->data, num_output_channels,
-				  chan_ctx.channel_op, chan_ctx.num_channel_ops,
-				  frames_per_packet);
-		break;
-	    case ACAST_MAP_INVALID:
-		break;
-	    }
-		
-	    lptr += frames_per_packet;
-	    rptr += frames_per_packet;	    
-	    
-	    dst->seqno = seqno++;
-	    dst->num_frames = frames_per_packet;
+	dst_ptr = dst_buffer;
+
+	while(num_frames >= frames_per_packet) {
+	    uint8_t packet_buffer[BYTES_PER_PACKET];
+	    acast_t* packet;
+	    size_t  bytes_to_send;
+
+	    packet = (acast_t*) packet_buffer;
+	    packet->seqno = seqno++;
+	    packet->num_frames = frames_per_packet;
+
+	    bytes_to_send = frames_per_packet*bytes_per_frame;
+	    memcpy(packet->data, dst_ptr, bytes_to_send);
+	    dst_ptr += bytes_to_send;
 	    
 	    if ((verbose > 3) && (seqno % 100 == 0)) {
-		acast_print(stderr, dst);
+		acast_print(stderr, packet);
 	    }
 
-	    bytes_to_send = dst->num_frames*bytes_per_frame;
-	    if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
+	    if (sendto(sock, (void*)packet, sizeof(acast_t)+bytes_to_send, 0,
 		       (struct sockaddr *) &addr, addrlen) < 0) {
 		fprintf(stderr, "failed to send frame %s\n",
 			strerror(errno));
@@ -342,27 +308,14 @@ int main(int argc, char** argv)
 		    first_time = last_time;
 		    send_time = first_time;
 		}
-		last_time = time_tick_wait_until(send_time +
-						 frame_delay_us-enc_delay);
+		last_time = time_tick_wait_until(send_time + frame_delay_us);
 		// send_time is the absolute send time mark
 		send_time += frame_delay_us;
 		num_frames -= frames_per_packet;
 	    }
 	}
-	if (num_frames) {
-	    if (lptr == pcm_l) { // read short
-		pcm_remain += num_frames;
-	    }
-	    else {                        // read long
-		memcpy(pcm_l, lptr, num_frames*sizeof(int16_t));
-		memcpy(pcm_r, rptr, num_frames*sizeof(int16_t));
-		pcm_remain = num_frames;
-	    }
-	}
-	else {
-	    pcm_remain = 0;
-	}
+	memcpy(dst_buffer, dst_ptr, num_frames*bytes_per_frame);
+	frames_remain = num_frames;
     }
-    hip_decode_exit(hip);
     exit(0);
 }
