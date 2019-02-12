@@ -4,7 +4,7 @@ LDFLAGS = -g
 OBJS =  acast_channel.o acast_file.o acast.o wav.o g711.o tick.o mp3.o
 LIBS = -lmp3lame -lasound
 
-all: acast_sender acast_receiver mp3_sender mp3_player wav_sender wav_player acast_info
+all: acast_sender acast_receiver mp3_sender wav_sender acast_player acast_info
 
 acast_sender:	acast_sender.o $(OBJS)
 	$(CC) -o$@ $(LDFLAGS) acast_sender.o $(OBJS) $(LIBS)
@@ -12,14 +12,11 @@ acast_sender:	acast_sender.o $(OBJS)
 mp3_sender:	mp3_sender.o $(OBJS)
 	$(CC) -o$@ $(LDFLAGS) mp3_sender.o $(OBJS) $(LIBS)
 
-mp3_player:	mp3_player.o $(OBJS)
-	$(CC) -o$@ $(LDFLAGS) mp3_player.o $(OBJS) $(LIBS)
-
 wav_sender:	wav_sender.o $(OBJS)
 	$(CC) -o$@ $(LDFLAGS) wav_sender.o $(OBJS) $(LIBS)
 
-wav_player:	wav_player.o $(OBJS)
-	$(CC) -o$@ $(LDFLAGS) wav_player.o $(OBJS) $(LIBS)
+acast_player:	acast_player.o $(OBJS)
+	$(CC) -o$@ $(LDFLAGS) acast_player.o $(OBJS) $(LIBS)
 
 acast_receiver:	acast_receiver.o $(OBJS)
 		$(CC) -o$@ $(LDFLAGS) acast_receiver.o $(OBJS) $(LIBS)
