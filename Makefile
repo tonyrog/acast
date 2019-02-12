@@ -28,10 +28,9 @@ acast_receiver.o: acast.h
 acast_sender.o: acast.h tick.h
 acast_channel.o: acast_channel.h
 acast.o: acast.h g711.h acast_channel.h
-wav_player.o: acast.h tick.h wav.h
+acast_player.o: acast.h tick.h wav.h mp3.h
 wav_sender.o: acast.h tick.h wav.h
 mp3_sender.o: acast.h tick.h mp3.h
-mp3_player.o: acast.h tick.h mp3.h
 wav.o:	wav.h
 mp3.o:	mp3.h
 g711.o:	g711.h
