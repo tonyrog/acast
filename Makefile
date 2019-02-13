@@ -13,7 +13,7 @@ afile_sender:	afile_sender.o $(OBJS)
 	$(CC) -o$@ $(LDFLAGS) afile_sender.o $(OBJS) $(LIBS)
 
 afile_player:	afile_player.o $(OBJS)
-	$(CC) -o$@ $(LDFLAGS) acast_player.o $(OBJS) $(LIBS)
+	$(CC) -o$@ $(LDFLAGS) afile_player.o $(OBJS) $(LIBS)
 
 acast_receiver:	acast_receiver.o $(OBJS)
 		$(CC) -o$@ $(LDFLAGS) acast_receiver.o $(OBJS) $(LIBS)
