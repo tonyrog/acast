@@ -20,12 +20,12 @@ typedef struct
     int dst;
 } acast_op_t;
 
-#define MAP_SRC(i,s1) { .op=OP_SRC, .src1=(s1), .src2 = 0, .dst = (i)}
-#define MAP_CONST(i,v2) { .op=OP_CONST, .src1 = 0, .src2 = (v2), .dst = (i)}
-#define MAP_ADD(i,s1,s2) { .op=OP_ADD, .src1 = (s1), .src2 = (s2), .dst = (i)}
-#define MAP_ADDC(i,s1,v2) { .op=OP_ADD, .src1 = (s1), .src2 = (v2), .dst = (i)}
-#define MAP_SUB(i,s1,s2) { .op=OP_SUB, .src1 = (s1), .src2 = (s2), .dst = (i)}
-#define MAP_SUBC(i,s1,v2) { .op=OP_SUBC, .src1 = (s1), .src2 = (v2), .dst = (i)}
+#define MAP_SRC(i,s1) { .op=ACAST_OP_SRC, .src1=(s1), .src2 = 0, .dst = (i) }
+#define MAP_CONST(i,v2) { .op=ACAST_OP_CONST, .src1 = 0, .src2 = (v2), .dst = (i)}
+#define MAP_ADD(i,s1,s2) { .op=ACAST_OP_ADD, .src1 = (s1), .src2 = (s2), .dst = (i)}
+#define MAP_ADDC(i,s1,v2) { .op=ACAST_OP_ADDC, .src1 = (s1), .src2 = (v2), .dst = (i)}
+#define MAP_SUB(i,s1,s2) { .op=ACAST_OP_SUB, .src1 = (s1), .src2 = (s2), .dst = (i)}
+#define MAP_SUBC(i,s1,v2) { .op=ACAST_OP_SUBC, .src1 = (s1), .src2 = (v2), .dst = (i)}
 
 #define TYPE_MAX_uint8_t 0xff
 #define TYPE_MIN_uint8_t 0x00
