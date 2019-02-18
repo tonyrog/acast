@@ -17,6 +17,7 @@
 
 #include "acast.h"
 #include "tick.h"
+#include "crc32.h"
 
 #define MAX_CLIENTS     9
 
@@ -436,6 +437,13 @@ int main(int argc, char** argv)
 		r = recvfrom(ctrl, (void*) ctl, sizeof(ctl_buffer), 0,
 			     (struct sockaddr *) &addr, &addrlen);
 		if (ctl->magic == CONTROL_MAGIC) {
+		    uint32_t crc = ctl->crc;
+		    ctl->crc = 0;
+		    if (crc32((uint8_t*)ctl, sizeof(actl_t)) != crc) {
+			fprintf(stderr, "crc error packet header corrupt\n");
+			continue;
+		    }
+		    ctl->crc = crc; // needed?
 		    client_add(&addr, addrlen, ctl->mask);
 		}
 	    }
@@ -507,6 +515,9 @@ int main(int argc, char** argv)
 		bytes_per_frame = client[i].num_output_channels *
 		    mparam.bytes_per_channel;
 		bytes_to_send = bytes_per_frame*dst->num_frames;
+
+		dst->crc = 0;
+		dst->crc = crc32((uint8_t*) dst, sizeof(acast_t));
 
 		if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
 			   (struct sockaddr *) &client[i].addr,

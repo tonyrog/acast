@@ -21,6 +21,7 @@
 #define MULTICAST_ADDR  "224.0.0.223"
 #define MULTICAST_PORT  22402          // audio data
 #define INTERFACE_ADDR  "0.0.0.0"
+#define ACAST_MAGIC     0x41434147     // "ACAF"
 #define CONTROL_PORT    22403          // control data
 #define CONTROL_MAGIC   0x41434143     // "ACAC"
 
@@ -41,7 +42,8 @@ typedef struct
 
 typedef struct
 {
-    uint32_t seqno;          // simple sequence number
+    uint32_t magic;          // identifier magic     
+    uint32_t seqno;          // sequence number
     uint32_t num_frames;     // number of frames in packet
     acast_params_t param;    // format params
     uint32_t crc;            // crc32 (seqno,num_frames,param)    
@@ -57,7 +59,7 @@ typedef struct
 
 typedef struct
 {
-    uint32_t magic;          // channels requested    
+    uint32_t magic;          // identifier magic
     uint32_t mask;           // channels requested
     uint32_t crc;            // crc32 (magic, mask)
 } actl_t;

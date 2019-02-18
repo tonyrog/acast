@@ -14,11 +14,15 @@
 #include <arpa/inet.h>
 
 #include "acast.h"
+#include "tick.h"
+#include "crc32.h"
 
 #define PLAYBACK_DEVICE "default"
 #define NUM_CHANNELS  0
 #define CHANNEL_MAP   "auto"
 #define SRC_CHANNELS 6           // max number of channels supported
+
+#define SUB_REFRESH_TIME 10000000  // 10s
 
 void help(void)
 {
@@ -29,12 +33,14 @@ printf("usage: acast_receiver [options] file\n"
 "  -a, --addr      multicast address (%s)\n"
 "  -i, --iface     multicast interface address (%s)\n"
 "  -p, --port      multicast address port (%d)\n"
+"  -q, --ctrl      multicast control port (%d)\n"       
 "  -d, --device    playback device (%s)\n"
 "  -c, --channels  number of output channels (%d)\n"
 "  -m, --map       channel map (%s)\n",       
        MULTICAST_ADDR,
        INTERFACE_ADDR,
        MULTICAST_PORT,
+       CONTROL_PORT,       
        PLAYBACK_DEVICE,
        NUM_CHANNELS,
        CHANNEL_MAP);       
@@ -77,6 +83,18 @@ void flush_packets(int sock)
     }
 }
 
+int send_subscribe(int sock, struct sockaddr_in* addr, socklen_t addrlen,
+		   uint32_t mask)
+{
+    actl_t sub;
+
+    sub.magic = CONTROL_MAGIC;
+    sub.mask  = mask;             // channel mask
+    sub.crc   = 0;
+    sub.crc = crc32((uint8_t*)&sub, sizeof(sub));
+    return sendto(sock, (void*) &sub, sizeof(sub), 0,
+		  (struct sockaddr *) addr, addrlen);
+}
 
 int main(int argc, char** argv)
 {
@@ -88,8 +106,11 @@ int main(int argc, char** argv)
     char* multicast_addr = MULTICAST_ADDR;
     char* multicast_ifaddr = INTERFACE_ADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
+    uint16_t control_port  = CONTROL_PORT;
     struct sockaddr_in addr;
     socklen_t addrlen;
+    struct sockaddr_in caddr;
+    socklen_t caddrlen;    
     uint8_t silence_buffer[BYTES_PER_PACKET];
     acast_t* silence;
     uint32_t last_seqno = 0;
@@ -105,6 +126,8 @@ int main(int argc, char** argv)
     size_t bytes_per_frame;
     size_t network_bufsize = BYTES_PER_PACKET;
     int mode = SND_PCM_NONBLOCK;
+    uint32_t submask = 0;
+    tick_t sub_time = 0;
 
     while(1) {
 	int option_index = 0;
@@ -112,17 +135,19 @@ int main(int argc, char** argv)
 	static struct option long_options[] = {
 	    {"help",   no_argument, 0,        'h'},
 	    {"verbose",no_argument, 0,        'v'},
-	    {"debug",  no_argument, 0,        'D'},		
+	    {"debug",  no_argument, 0,        'D'},
 	    {"addr",   required_argument, 0,  'a'},
 	    {"iface",  required_argument, 0,  'i'},
 	    {"port",   required_argument, 0,  'p'},
+	    {"ctrl",   required_argument, 0,  'q'},
 	    {"device", required_argument, 0,  'd'},
-	    {"channels",required_argument, 0, 'c'},		
-	    {"map",     required_argument, 0, 'm'},		
+	    {"channels",required_argument, 0, 'c'},
+	    {"map",     required_argument, 0, 'm'},
+	    {"sub",     required_argument, 0, 's'},
 	    {0,        0,                 0, 0}
 	};
 	
-	c = getopt_long(argc, argv, "lhva:i:p:t:d:c:",
+	c = getopt_long(argc, argv, "lhva:i:p:t:d:c:m:s:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -154,12 +179,32 @@ int main(int argc, char** argv)
 		exit(1);
 	    }
 	    break;
+	case 'q':
+	    control_port = atoi(optarg);
+	    if ((control_port < 1) || (control_port > 65535)) {
+		fprintf(stderr, "control port out of range\n");
+		exit(1);
+	    }
+	    break;
 	case 'c':
 	    num_output_channels = atoi(optarg);
 	    break;
 	case 'm':
 	    map = strdup(optarg);
 	    break;
+	case 's': {
+	    char* ptr = optarg;
+	    submask = 0;
+	    while(*ptr) {
+		if (!isdigit(*ptr)) {
+		    fprintf(stderr, "sub argument expect digits argument\n");
+		    exit(1);
+		}
+		submask |= (1 << (*ptr - '0'));
+		ptr++;
+	    }
+	    break;
+	}
 	default:
 	    help();
 	    exit(1);	    
@@ -202,13 +247,17 @@ int main(int argc, char** argv)
 		strerror(errno));
 	exit(1);
     }
+    // caddr - control address multicast subscription
+    caddr = addr;
+    caddrlen = addrlen;
+    caddr.sin_port = htons(control_port);
+    
     if (verbose) {
 	fprintf(stderr, "multicast from %s:%d on interface %s\n",
 		multicast_addr, multicast_port, multicast_ifaddr);
 	fprintf(stderr, "recv addr=%s, len=%d\n",
 		inet_ntoa(addr.sin_addr), addrlen);
     }
-    
 
     silence =  (acast_t*) silence_buffer;
     silence->num_frames = frames_per_packet;
@@ -217,10 +266,16 @@ int main(int argc, char** argv)
 
     // flush_packets(sock);
     
+    if (submask != 0) {
+	send_subscribe(sock, &caddr, caddrlen, submask);
+	sub_time = time_tick_now();
+    }
+    
     while(1) {
 	int r;
 	struct pollfd fds;
-
+	uint32_t crc;
+	
 	fds.fd = sock;
 	fds.events = POLLIN;
 
@@ -239,6 +294,16 @@ int main(int argc, char** argv)
 	    }
 	    if (r == 0)
 		continue;
+
+	    if (src->magic != ACAST_MAGIC)
+		continue;
+	    crc = src->crc;
+	    src->crc = 0;
+	    if (crc32((uint8_t*) src, sizeof(acast_t)) != crc) {
+		fprintf(stderr, "crc error packet header corrupt\n");
+		continue;
+	    }
+	    src->crc = crc;  // needed?	    
 
 	    if (debug) {
 		if ((r - sizeof(acast_t)) !=
@@ -337,6 +402,14 @@ int main(int argc, char** argv)
 	    }
 	    seen_packet = 1;
 	    last_seqno = dst->seqno;
+	}
+
+	if (submask != 0) {
+	    tick_t now = time_tick_now();
+	    if ((now - sub_time) >= SUB_REFRESH_TIME) {
+		send_subscribe(sock, &caddr, caddrlen, submask);
+		sub_time = now;
+	    }
 	}
     }
     exit(0);
