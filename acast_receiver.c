@@ -256,7 +256,9 @@ int main(int argc, char** argv)
 	exit(1);
     }
     // caddr - control address multicast subscription
-    caddr = addr;
+    memset((char *)&caddr, 0, sizeof(caddr));
+    caddr.sin_family = AF_INET;
+    inet_aton(multicast_addr, &caddr.sin_addr);
     caddrlen = addrlen;
     caddr.sin_port = htons(control_port);
     
