@@ -114,33 +114,33 @@ static void CAT2(scatter_gather_ii_,TYPE)
      size_t frames)
 {
     while(frames--) {
-	int j;
-	for (j = 0;  j < nmap; j++) {
+	int i;
+	for (i = 0;  i < nmap; i++) {
 	    TYPE v;
-	    switch(map[j].op) {
+	    switch(map[i].op) {
 	    case ACAST_OP_SRC:
-		v = src[map[j].src1];
+		v = src[map[i].src1];
 		break;
 	    case ACAST_OP_CONST:
-		v = map[j].src1;
+		v = map[i].src1;
 		break;
 	    case ACAST_OP_ADD:
-		v = CAT2(sum_,TYPE)(src[map[j].src1],src[map[j].src2]);
+		v = CAT2(sum_,TYPE)(src[map[i].src1],src[map[i].src2]);
 		break;
 	    case ACAST_OP_ADDC:
-		v = CAT2(sum_,TYPE)(src[map[j].src1],map[j].src2);
+		v = CAT2(sum_,TYPE)(src[map[i].src1],map[i].src2);
 		break;
 	    case ACAST_OP_SUB:
-		v = CAT2(diff_,TYPE)(src[map[j].src1],src[map[j].src2]);
+		v = CAT2(diff_,TYPE)(src[map[i].src1],src[map[i].src2]);
 		break;
 	    case ACAST_OP_SUBC:
-		v = CAT2(diff_,TYPE)(src[map[j].src1],map[j].src2);
+		v = CAT2(diff_,TYPE)(src[map[i].src1],map[i].src2);
 		break;
 	    default:
 		v = 0;
 		break;
 	    }
-	    dst[map[j].dst] = v;
+	    dst[map[i].dst] = v;
 	}
 	dst += dst_stride;
 	src += src_stride;

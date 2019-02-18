@@ -1,7 +1,7 @@
 CFLAGS = -Og  -Wall
 LDFLAGS = -g
 
-OBJS =  acast_channel.o acast_file.o acast.o wav.o g711.o tick.o mp3.o
+OBJS =  acast_channel.o acast_file.o acast.o wav.o g711.o tick.o mp3.o crc32.o
 LIBS = -lmp3lame -lasound
 
 all: acast_sender acast_receiver afile_sender afile_player acast_info

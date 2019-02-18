@@ -261,7 +261,7 @@ int main(int argc, char** argv)
 
 		lparam = src->param;
 		iparam = lparam;
-		iparam.channels_per_frame = num_output_channels;
+		num_output_channels = iparam.channels_per_frame;
 
 		acast_setup_param(handle, &iparam, &sparam, &frames_per_packet);
 

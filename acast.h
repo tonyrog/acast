@@ -44,6 +44,7 @@ typedef struct
     uint32_t seqno;          // simple sequence number
     uint32_t num_frames;     // number of frames in packet
     acast_params_t param;    // format params
+    uint32_t crc;            // crc32 (seqno,num_frames,param)    
     uint8_t  data[0];        // audio data
 } acast_t;
 
@@ -56,11 +57,10 @@ typedef struct
 
 typedef struct
 {
-    uint32_t magic;          // control magic
+    uint32_t magic;          // channels requested    
     uint32_t mask;           // channels requested
-    uint32_t check;          // crc32 (address+port+magic+mask)
+    uint32_t crc;            // crc32 (magic, mask)
 } actl_t;
-
 
 extern void acast_clear_param(acast_params_t* acast);
 extern void acast_print_params(FILE* f, acast_params_t* params);
