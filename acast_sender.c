@@ -424,7 +424,7 @@ int main(int argc, char** argv)
     while(1) {
 	int r;
 
-	if (ctrl >= 0) {  // client_mode != CLIENT_MODE_UNICAST
+	if (ctrl >= 0) {  // client_mode != CLIENT_MODE_MULTICAST
 	    struct pollfd fds;
 	    fds.fd = ctrl;
 	    fds.events = POLLIN;
@@ -436,6 +436,12 @@ int main(int argc, char** argv)
 		ctl = (actl_t*) ctl_buffer;
 		r = recvfrom(ctrl, (void*) ctl, sizeof(ctl_buffer), 0,
 			     (struct sockaddr *) &addr, &addrlen);
+		if (verbose) {
+		    fprintf(stderr, "got subscription from %s:%d mask=%d\n",
+			    inet_ntoa(addr.sin_addr), ntohs(addr.sin_port),
+			    ctl->mask);
+		}
+		
 		if (ctl->magic == CONTROL_MAGIC) {
 		    uint32_t crc = ctl->crc;
 		    ctl->crc = 0;

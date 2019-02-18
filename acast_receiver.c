@@ -92,6 +92,13 @@ int send_subscribe(int sock, struct sockaddr_in* addr, socklen_t addrlen,
     sub.mask  = mask;             // channel mask
     sub.crc   = 0;
     sub.crc = crc32((uint8_t*)&sub, sizeof(sub));
+
+    if (verbose) {
+	fprintf(stderr, "subscribe %s:%d channel mask=%08x\n",
+		inet_ntoa(addr->sin_addr), ntohs(addr->sin_port),
+		mask);
+    }
+    
     return sendto(sock, (void*) &sub, sizeof(sub), 0,
 		  (struct sockaddr *) addr, addrlen);
 }
