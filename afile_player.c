@@ -28,9 +28,6 @@ int debug = 0;
 #define min(a,b) (((a)<(b)) ? (a) : (b))
 #define max(a,b) (((a)>(b)) ? (a) : (b))
 
-#define BYTES_PER_BUFFER ((1152*2*2)+sizeof(acast_t))
-
-
 void help(void)
 {
 printf("usage: acast_player [options] file\n"

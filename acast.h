@@ -16,6 +16,7 @@
 #include <alsa/asoundlib.h>
 
 #include "acast_channel.h"
+#include "tick.h"
 
 // default values
 #define MULTICAST_ADDR  "224.0.0.223"
@@ -60,9 +61,32 @@ typedef struct
 typedef struct
 {
     uint32_t magic;          // identifier magic
+    uint32_t id;             // use id if id != 0
     uint32_t mask;           // channels requested
     uint32_t crc;            // crc32 (magic, mask)
 } actl_t;
+
+#define CLIENT_TIMEOUT 5000000  // 5s
+
+#define CLIENT_MODE_UNICAST   1
+#define CLIENT_MODE_MULTICAST 2
+#define CLIENT_MODE_MIXED     3
+
+#define PCM_BUFFER_SIZE 1152
+#define BYTES_PER_BUFFER ((PCM_BUFFER_SIZE*2*2)+sizeof(acast_t))
+
+typedef struct
+{
+    uint32_t            id;                   // used if != 0
+    struct sockaddr_in  addr;
+    socklen_t           addrlen;
+    tick_t              tmo;                  // next timeout
+    uint32_t            mask;                 // channel mask
+    int                 num_output_channels;
+    acast_channel_ctx_t chan_ctx;
+    uint8_t*            ptr;                  // where to fill
+    uint8_t             buffer[2*BYTES_PER_BUFFER];
+} client_t;
 
 extern void acast_clear_param(acast_params_t* acast);
 extern void acast_print_params(FILE* f, acast_params_t* params);

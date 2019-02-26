@@ -29,23 +29,6 @@
 #define MULTICAST_TTL  1
 #define MULTICAST_LOOP 0
 
-#define CLIENT_TIMEOUT 30000000  // 30s
-
-#define CLIENT_MODE_UNICAST   1
-#define CLIENT_MODE_MULTICAST 2
-#define CLIENT_MODE_MIXED     3
-
-typedef struct
-{
-    struct sockaddr_in  addr;
-    socklen_t           addrlen;
-    tick_t              tmo;                  // next timeout
-    uint32_t            mask;                 // channel mask
-    int                 num_output_channels;
-    acast_channel_ctx_t chan_ctx;
-    uint8_t             buffer[BYTES_PER_PACKET];
-} client_t;
-
 // client 0 is the default multicast client
 static int num_clients = 1;
 client_t client[MAX_CLIENTS];
@@ -109,40 +92,54 @@ void set_client_mask(client_t* cp, uint32_t mask)
     cp->num_output_channels = j;
 }
 
-int client_add(struct sockaddr_in* addr, socklen_t addrlen, uint32_t mask)
+// fixme store compare struct sockaddr ?
+int client_add(uint32_t id,struct sockaddr_in* addr,socklen_t addrlen,
+	       uint32_t mask)
 {
     int i;
     for (i = 0; i < num_clients; i++) {
 	// maybe compare components?
-	if (memcmp(&client[i].addr, &addr, addrlen) == 0) {
+	if ((client[i].id && (client[i].id == id)) ||
+	    ((client[i].id == 0) && (id == 0) &&
+	     (memcmp(&client[i].addr, &addr, addrlen) == 0))) {
+	    int updated = 0;
 	    client[i].tmo = time_tick_now() + CLIENT_TIMEOUT;
 	    if (mask != client[i].mask) {
 		set_client_mask(&client[i], mask);
-		if (verbose) {
-		    fprintf(stderr, "unicast client [%d] %s:%d updated\n",
-			    i, inet_ntoa(addr->sin_addr),
-			    ntohs(addr->sin_port));
-		}
+		updated = 1;
+	    }
+	    if (memcmp(&client[i].addr, &addr, addrlen) != 0) {
+		client[i].addr = *addr;
+		updated = 1;
+	    }
+	    if (updated && verbose) {
+		fprintf(stderr, "unicast client [%d] id=%d %s:%d updated\n",
+			i, client[i].id,
+			inet_ntoa(addr->sin_addr),
+			ntohs(addr->sin_port));
 	    }
 	    return 0;
 	}
     }
     if (num_clients < MAX_CLIENTS) {
 	i = num_clients++;
+	client[i].id   = id;
 	client[i].addr = *addr;
 	client[i].addrlen = addrlen;
-	client[i].tmo = time_tick_now() + CLIENT_TIMEOUT;	
+	client[i].tmo = time_tick_now() + CLIENT_TIMEOUT;
+	client[i].ptr = client[i].buffer;	
 	set_client_mask(&client[i], mask);
 
 	if (verbose) {
-	    fprintf(stderr, "unicast client[%d] %s:%d added\n",
-		    i, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+	    fprintf(stderr, "unicast client[%d] id=%d %s:%d added\n",
+		    i, id, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
 	}
 	return 0;
     }
     return -1;
 }
 
+// parse client list -u <ip>:<port> -u <ip>:<port> ...
 int parse_clients(char** uclient, size_t num_uclients, uint16_t default_port)
 {
     int i;
@@ -169,7 +166,7 @@ int parse_clients(char** uclient, size_t num_uclients, uint16_t default_port)
 	uaddr.sin_family = AF_INET;
 	uaddr.sin_port = htons(uport);
 	// fixme, make channels flexibel
-	if (client_add(&uaddr, uaddrlen, (1<<i)) < 0)
+	if (client_add(0, &uaddr, uaddrlen, (1<<i)) < 0)
 	    return -1;
     }
     return 0;
@@ -193,9 +190,9 @@ int main(int argc, char** argv)
     int sock, ctrl;
     char* multicast_addr = MULTICAST_ADDR;
     uint16_t multicast_port = MULTICAST_PORT;
-    int multicast_loop = MULTICAST_LOOP;       // loopback multicast packets
+    int multicast_loop = MULTICAST_LOOP;     // loopback multicast packets
     int multicast_ttl  = MULTICAST_TTL;
-    char* interface_addr = INTERFACE_ADDR; // interface address
+    char* multicast_ifaddr = INTERFACE_ADDR; // interface address
     uint16_t control_port = CONTROL_PORT;
     int num_input_channels = 2;
     char* map = CHANNEL_MAP;
@@ -275,7 +272,7 @@ int main(int argc, char** argv)
 	    multicast_addr = strdup(optarg);
 	    break;
 	case 'i':
-	    interface_addr = strdup(optarg);
+	    multicast_ifaddr = strdup(optarg);
 	    break;
 	case 'u':
 	    if (num_uclients >= MAX_CLIENTS-1) {
@@ -367,7 +364,7 @@ int main(int argc, char** argv)
     acast_print(stderr, src);
 
     if ((sock = acast_sender_open(multicast_addr,
-				  interface_addr,
+				  multicast_ifaddr,
 				  multicast_port,
 				  multicast_ttl,
 				  multicast_loop,
@@ -384,7 +381,7 @@ int main(int argc, char** argv)
     if (client_mode == CLIENT_MODE_MULTICAST)
 	ctrl = -1;
     else if ((ctrl = acast_receiver_open(multicast_addr,
-					 interface_addr,
+					 multicast_ifaddr,
 					 control_port,
 					 &iaddr, &iaddrlen,
 					 client[0].num_output_channels*
@@ -397,7 +394,7 @@ int main(int argc, char** argv)
 	if (verbose) {
 	    // Control input
 	    fprintf(stderr, "multicast from %s:%d on interface %s\n",
-		    multicast_addr, control_port, interface_addr);
+		    multicast_addr, control_port, multicast_ifaddr);
 	    fprintf(stderr, "recv addr=%s, len=%d\n",
 		    inet_ntoa(iaddr.sin_addr), iaddrlen);
 	}
@@ -409,7 +406,7 @@ int main(int argc, char** argv)
 	    fprintf(stderr, "multicast to %s:%d\n",
 		    multicast_addr, multicast_port);
 	    fprintf(stderr, "send from interface %s ttl=%d loop=%d\n",
-		    interface_addr, multicast_ttl,  multicast_loop);
+		    multicast_ifaddr, multicast_ttl,  multicast_loop);
 	    fprintf(stderr, "send to addr=%s, len=%d\n",
 		    inet_ntoa(maddr.sin_addr), maddrlen);
 	}
@@ -430,6 +427,7 @@ int main(int argc, char** argv)
 	    fds.events = POLLIN;
 
 	    if ((r = poll(&fds, 1, 0)) == 1) { // control input
+		uint32_t crc;
 		actl_t* ctl;
 		uint8_t  ctl_buffer[BYTES_PER_PACKET];
 
@@ -441,16 +439,12 @@ int main(int argc, char** argv)
 			    inet_ntoa(addr.sin_addr), ntohs(addr.sin_port),
 			    ctl->mask);
 		}
-		
-		if (ctl->magic == CONTROL_MAGIC) {
-		    uint32_t crc = ctl->crc;
-		    ctl->crc = 0;
-		    if (crc32((uint8_t*)ctl, sizeof(actl_t)) != crc) {
-			fprintf(stderr, "crc error packet header corrupt\n");
-			continue;
-		    }
-		    ctl->crc = crc; // needed?
-		    client_add(&addr, addrlen, ctl->mask);
+
+		crc = ctl->crc;
+		ctl->crc = 0;
+		if ((ctl->magic != CONTROL_MAGIC) &&
+		    crc32((uint8_t*) ctl, sizeof(actl_t)) == crc) {
+		    client_add(ctl->id, &addr, addrlen, ctl->mask);
 		}
 	    }
 	}
@@ -515,15 +509,16 @@ int main(int argc, char** argv)
 		    // error
 		    break;
 		}
+		dst->magic = ACAST_MAGIC;
 		dst->seqno = seqno++;
 		dst->num_frames = r;
 		dst->param.channels_per_frame = client[i].num_output_channels;
-		bytes_per_frame = client[i].num_output_channels *
-		    mparam.bytes_per_channel;
-		bytes_to_send = bytes_per_frame*dst->num_frames;
-
 		dst->crc = 0;
 		dst->crc = crc32((uint8_t*) dst, sizeof(acast_t));
+
+		bytes_per_frame = client[i].num_output_channels *
+		    mparam.bytes_per_channel;		
+		bytes_to_send = bytes_per_frame*dst->num_frames;
 
 		if (sendto(sock, (void*)dst, sizeof(acast_t)+bytes_to_send, 0,
 			   (struct sockaddr *) &client[i].addr,

@@ -17,6 +17,7 @@
 #include "acast.h"
 #include "acast_file.h"
 #include "tick.h"
+#include "crc32.h"
 
 #define MAX_CLIENTS     9
 // ttl=0 local host, ttl=1 local network
@@ -24,27 +25,6 @@
 #define MULTICAST_LOOP 0
 #define NUM_CHANNELS   0
 #define CHANNEL_MAP   "auto"
-
-#define PCM_BUFFER_SIZE 1152
-#define BYTES_PER_BUFFER ((PCM_BUFFER_SIZE*2*2)+sizeof(acast_t))
-
-#define CLIENT_TIMEOUT 30000000  // 30s
-
-#define CLIENT_MODE_UNICAST   1
-#define CLIENT_MODE_MULTICAST 2
-#define CLIENT_MODE_MIXED     3
-
-typedef struct
-{
-    struct sockaddr_in  addr;
-    socklen_t           addrlen;
-    tick_t              tmo;                  // next timeout
-    uint32_t            mask;                 // channel mask
-    int                 num_output_channels;
-    acast_channel_ctx_t chan_ctx;
-    uint8_t*            ptr;                  // where to fill
-    uint8_t             buffer[2*BYTES_PER_BUFFER];
-} client_t;
 
 // client 0 is the default multicast client
 static int num_clients = 1;
@@ -101,26 +81,38 @@ void set_client_mask(client_t* cp, uint32_t mask)
     cp->num_output_channels = j;
 }
 
-int client_add(struct sockaddr_in* addr, socklen_t addrlen, uint32_t mask)
+// fixme store compare struct sockaddr ?
+int client_add(uint32_t id,struct sockaddr_in* addr,socklen_t addrlen,
+	       uint32_t mask)
 {
     int i;
     for (i = 0; i < num_clients; i++) {
 	// maybe compare components?
-	if (memcmp(&client[i].addr, &addr, addrlen) == 0) {
+	if ((client[i].id && (client[i].id == id)) ||
+	    ((client[i].id == 0) && (id == 0) &&
+	     (memcmp(&client[i].addr, &addr, addrlen) == 0))) {
+	    int updated = 0;
 	    client[i].tmo = time_tick_now() + CLIENT_TIMEOUT;
 	    if (mask != client[i].mask) {
 		set_client_mask(&client[i], mask);
-		if (verbose) {
-		    fprintf(stderr, "unicast client [%d] %s:%d updated\n",
-			    i, inet_ntoa(addr->sin_addr),
-			    ntohs(addr->sin_port));
-		}
+		updated = 1;
+	    }
+	    if (memcmp(&client[i].addr, &addr, addrlen) != 0) {
+		client[i].addr = *addr;
+		updated = 1;
+	    }
+	    if (updated && verbose) {
+		fprintf(stderr, "unicast client [%d] id=%d %s:%d updated\n",
+			i, client[i].id,
+			inet_ntoa(addr->sin_addr),
+			ntohs(addr->sin_port));
 	    }
 	    return 0;
 	}
     }
     if (num_clients < MAX_CLIENTS) {
 	i = num_clients++;
+	client[i].id   = id;
 	client[i].addr = *addr;
 	client[i].addrlen = addrlen;
 	client[i].tmo = time_tick_now() + CLIENT_TIMEOUT;
@@ -128,14 +120,15 @@ int client_add(struct sockaddr_in* addr, socklen_t addrlen, uint32_t mask)
 	set_client_mask(&client[i], mask);
 
 	if (verbose) {
-	    fprintf(stderr, "unicast client[%d] %s:%d added\n",
-		    i, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+	    fprintf(stderr, "unicast client[%d] id=%d %s:%d added\n",
+		    i, id, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
 	}
 	return 0;
     }
     return -1;
 }
 
+// parse client list -u <ip>:<port> -u <ip>:<port> ...
 int parse_clients(char** uclient, size_t num_uclients, uint16_t default_port)
 {
     int i;
@@ -162,7 +155,7 @@ int parse_clients(char** uclient, size_t num_uclients, uint16_t default_port)
 	uaddr.sin_family = AF_INET;
 	uaddr.sin_port = htons(uport);
 	// fixme, make channels flexibel
-	if (client_add(&uaddr, uaddrlen, (1<<i)) < 0)
+	if (client_add(0, &uaddr, uaddrlen, (1<<i)) < 0)
 	    return -1;
     }
     return 0;
@@ -344,6 +337,7 @@ int main(int argc, char** argv)
 		strerror(errno));
 	exit(1);
     }
+    
     client[0].addr = addr;
     client[0].addrlen = addrlen;
     client[0].tmo = 0;
@@ -364,7 +358,7 @@ int main(int argc, char** argv)
     else {
 	if (verbose) {
 	    // Control input
-	    fprintf(stderr, "multicast from %s:%d on interface %s\n",
+	    fprintf(stderr, "control from %s:%d on interface %s\n",
 		    multicast_addr, control_port, interface_addr);
 	    fprintf(stderr, "recv addr=%s, len=%d\n",
 		    inet_ntoa(iaddr.sin_addr), iaddrlen);
@@ -374,9 +368,9 @@ int main(int argc, char** argv)
     if (verbose) {
 	if (client_mode != CLIENT_MODE_UNICAST) {
 	    // Mulicast data output
-	    fprintf(stderr, "multicast to %s:%d\n",
+	    fprintf(stderr, "data to %s:%d\n",
 		    multicast_addr, multicast_port);
-	    fprintf(stderr, "send from interface %s ttl=%d loop=%d\n",
+	    fprintf(stderr, "sent from interface %s ttl=%d loop=%d\n",
 		    interface_addr, multicast_ttl,  multicast_loop);
 	    fprintf(stderr, "send to addr=%s, len=%d\n",
 		    inet_ntoa(addr.sin_addr), addrlen);
@@ -384,7 +378,7 @@ int main(int argc, char** argv)
     }
     
     mparam = af->param;
-    mparam.channels_per_frame = client[0].num_output_channels;    
+    mparam.channels_per_frame = client[0].num_output_channels;
     frames_per_packet = acast_get_frames_per_packet(&mparam);
     frame_delay_us = (frames_per_packet*1000000) / mparam.sample_rate;
     
@@ -405,6 +399,7 @@ int main(int argc, char** argv)
 	
 	if (ctrl >= 0) {  // client_mode != CLIENT_MODE_UNICAST
 	    int r;
+	    uint32_t crc;
 	    struct pollfd fds;
 	    fds.fd = ctrl;
 	    fds.events = POLLIN;
@@ -413,11 +408,23 @@ int main(int argc, char** argv)
 		actl_t* ctl;
 		uint8_t  ctl_buffer[BYTES_PER_PACKET];
 
+		if (verbose) {
+		    fprintf(stderr, "poll ctrl channel\n");
+		}		
+
 		ctl = (actl_t*) ctl_buffer;
 		r = recvfrom(ctrl, (void*) ctl, sizeof(ctl_buffer), 0,
 			     (struct sockaddr *) &addr, &addrlen);
-		if (ctl->magic == CONTROL_MAGIC) {
-		    client_add(&addr, addrlen, ctl->mask);
+		if (verbose) {
+		    fprintf(stderr, "control packet from %s:%d\n",
+			    inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+		}
+
+		crc = ctl->crc;
+		ctl->crc = 0;
+		if ((ctl->magic == CONTROL_MAGIC) &&
+		    crc32((uint8_t*) ctl, sizeof(actl_t)) == crc) {
+		    client_add(ctl->id, &addr, addrlen, ctl->mask);
 		}
 	    }
 	}
@@ -470,6 +477,7 @@ int main(int argc, char** argv)
 	    size_t  bytes_to_send;
 
 	    packet = (acast_t*) packet_buffer;
+	    packet->magic = ACAST_MAGIC;
 	    packet->param = mparam;
 	    packet->seqno = seqno++;
 	    packet->num_frames = frames_per_packet;
@@ -486,6 +494,8 @@ int main(int argc, char** argv)
 		if ((verbose > 3) && (seqno % 100 == 0)) {
 		    acast_print(stderr, packet);
 		}
+		packet->crc = 0;
+		packet->crc = crc32((uint8_t*)packet,sizeof(acast_t));
 
 		// fixme send using sendmsg! keep packet header separate
 		if (sendto(sock,(void*)packet,sizeof(acast_t)+bytes_to_send, 0,

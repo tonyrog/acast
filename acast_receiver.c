@@ -22,28 +22,41 @@
 #define CHANNEL_MAP   "auto"
 #define SRC_CHANNELS 6           // max number of channels supported
 
+#define MULTICAST_TTL  1
+#define MULTICAST_LOOP 0
+
 #define SUB_REFRESH_TIME 10000000  // 10s
+
+#define CLIENT_MODE_UNICAST   1
+#define CLIENT_MODE_MULTICAST 2
+#define CLIENT_MODE_MIXED     3
 
 void help(void)
 {
 printf("usage: acast_receiver [options] file\n"
 "  -h, --help      print help\n"
 "  -v, --verbose   increase verbosity\n"
-"  -D, --debug     debug verbosity\n"              
+"  -D, --debug     debug verbosity\n"
+"  -M, --multicast multicast mode only\n"
+"  -U, --unicast   unicast mode only\n"     
 "  -a, --addr      multicast address (%s)\n"
 "  -i, --iface     multicast interface address (%s)\n"
 "  -p, --port      multicast address port (%d)\n"
-"  -q, --ctrl      multicast control port (%d)\n"       
+"  -q, --ctrl      multicast control port (%d)\n"
+"  -l, --loop      enable multi cast loop (%d)\n"
+"  -t, --ttl       multicast ttl (%d)\n"       
 "  -d, --device    playback device (%s)\n"
 "  -c, --channels  number of output channels (%d)\n"
 "  -m, --map       channel map (%s)\n",       
        MULTICAST_ADDR,
        INTERFACE_ADDR,
        MULTICAST_PORT,
-       CONTROL_PORT,       
+       CONTROL_PORT,
+       MULTICAST_LOOP,
+       MULTICAST_TTL,
        PLAYBACK_DEVICE,
        NUM_CHANNELS,
-       CHANNEL_MAP);       
+       CHANNEL_MAP);
 }
 
 int verbose = 0;
@@ -84,18 +97,19 @@ void flush_packets(int sock)
 }
 
 int send_subscribe(int sock, struct sockaddr_in* addr, socklen_t addrlen,
-		   uint32_t mask)
+		   uint32_t id, uint32_t mask)
 {
     actl_t sub;
 
     sub.magic = CONTROL_MAGIC;
+    sub.id    = id;
     sub.mask  = mask;             // channel mask
     sub.crc   = 0;
     sub.crc = crc32((uint8_t*)&sub, sizeof(sub));
 
     if (verbose) {
-	fprintf(stderr, "subscribe %s:%d channel mask=%08x\n",
-		inet_ntoa(addr->sin_addr), ntohs(addr->sin_port),
+	fprintf(stderr, "subscribe id=%d, %s:%d channel mask=%08x\n",
+		id, inet_ntoa(addr->sin_addr), ntohs(addr->sin_port),
 		mask);
     }
     
@@ -109,10 +123,13 @@ int main(int argc, char** argv)
     snd_pcm_t *handle;
     int err;
     int sock;
+    int ctrl;
     int len;
     char* multicast_addr = MULTICAST_ADDR;
     char* multicast_ifaddr = INTERFACE_ADDR;    // interface address
     uint16_t multicast_port = MULTICAST_PORT;
+    int multicast_loop = MULTICAST_LOOP;        // loopback multicast packets
+    int multicast_ttl  = MULTICAST_TTL;
     uint16_t control_port  = CONTROL_PORT;
     struct sockaddr_in addr;
     socklen_t addrlen;
@@ -135,7 +152,9 @@ int main(int argc, char** argv)
     int mode = SND_PCM_NONBLOCK;
     uint32_t submask = 0;
     tick_t sub_time = 0;
-
+    int client_mode = CLIENT_MODE_MIXED;
+    uint32_t client_id = 0;
+    
     while(1) {
 	int option_index = 0;
 	int c;
@@ -147,15 +166,20 @@ int main(int argc, char** argv)
 	    {"iface",  required_argument, 0,  'i'},
 	    {"port",   required_argument, 0,  'p'},
 	    {"ctrl",   required_argument, 0,  'q'},
+	    {"ttl",    required_argument, 0,  't'},
+	    {"loop",   no_argument,       0,  'l'},	    
 	    {"device", required_argument, 0,  'd'},
 	    {"channels",required_argument, 0, 'c'},
 	    {"map",     required_argument, 0, 'm'},
 	    {"sub",     required_argument, 0, 's'},
-	    {0,        0,                 0, 0}
+	    {"unicast", no_argument,       0, 'U'},
+	    {"multicast", no_argument,     0, 'M'},
+	    {"id",      required_argument, 0, 'I'},
+	    {0,        0,                  0, 0}
 	};
 	
 
-	c = getopt_long(argc, argv, "lhva:i:p:t:d:c:m:s:",
+	c = getopt_long(argc, argv, "lhvDUMa:i:p:t:d:c:m:s:I:",
                         long_options, &option_index);
 	if (c == -1)
 	    break;
@@ -164,6 +188,12 @@ int main(int argc, char** argv)
 	    help();
 	    exit(0);
 	    break;
+	case 'U':
+	    client_mode = CLIENT_MODE_UNICAST;
+	    break;
+	case 'M':
+	    client_mode = CLIENT_MODE_MULTICAST;
+	    break;
 	case 'v':
 	    verbose++;
 	    break;
@@ -171,6 +201,12 @@ int main(int argc, char** argv)
 	    verbose++;
 	    debug = 1;
             break;
+	case 'l':
+	    multicast_loop = 1;
+	    break;
+	case 't':
+	    multicast_ttl = atoi(optarg);
+	    break;	    
 	case 'd':
 	    playback_device_name = strdup(optarg);
 	    break;
@@ -200,7 +236,7 @@ int main(int argc, char** argv)
 	case 'm':
 	    map = strdup(optarg);
 	    break;
-	case 's': {
+	case 's': {  // channel subscription mask
 	    char* ptr = optarg;
 	    submask = 0;
 	    while(*ptr) {
@@ -213,6 +249,9 @@ int main(int argc, char** argv)
 	    }
 	    break;
 	}
+	case 'I':
+	    client_id = atoi(optarg);
+	    break;
 	default:
 	    help();
 	    exit(1);	    
@@ -255,12 +294,30 @@ int main(int argc, char** argv)
 		strerror(errno));
 	exit(1);
     }
-    // caddr - control address multicast subscription
-    memset((char *)&caddr, 0, sizeof(caddr));
-    caddr.sin_family = AF_INET;
-    inet_aton(multicast_addr, &caddr.sin_addr);
-    caddrlen = addrlen;
-    caddr.sin_port = htons(control_port);
+
+    if (client_mode == CLIENT_MODE_MULTICAST)
+	ctrl = -1;    
+    else if ((ctrl = acast_sender_open(multicast_addr,
+				       multicast_ifaddr,
+				       control_port,
+				       multicast_ttl,
+				       multicast_loop,
+				       &caddr, &caddrlen,
+				       network_bufsize)) < 0) {
+	fprintf(stderr, "unable to open multicast socket %s\n",
+		strerror(errno));
+	exit(1);
+    }
+    else {
+	if (verbose) {
+	    // Control output
+	    fprintf(stderr, "multicast to %s:%d on interface %s\n",
+		    multicast_addr, control_port, multicast_ifaddr);
+	    fprintf(stderr, "send addr=%s, len=%d\n",
+		    inet_ntoa(caddr.sin_addr), caddrlen);
+	}
+    }
+    
     
     if (verbose) {
 	fprintf(stderr, "multicast from %s:%d on interface %s\n",
@@ -276,34 +333,57 @@ int main(int argc, char** argv)
 
     // flush_packets(sock);
     
-    if (submask != 0) {
-	send_subscribe(sock, &caddr, caddrlen, submask);
+    if ((submask != 0) && (ctrl > -1)) {
+	send_subscribe(ctrl, &caddr, caddrlen, client_id, submask);
 	sub_time = time_tick_now();
     }
     
     while(1) {
 	int r;
-	struct pollfd fds;
+	struct pollfd fds[2];
 	uint32_t crc;
 	
-	fds.fd = sock;
-	fds.events = POLLIN;
+	fds[0].fd = sock;
+	fds[0].events = POLLIN;
+	fds[1].fd = ctrl;
+	fds[1].events = POLLIN;	
 
-	if ((r = poll(&fds, 1, 1000)) == 1) {
+	if ((r = poll(fds, 2, 1000)) > 0) {
 	    acast_t* src;
 	    uint8_t src_buffer[BYTES_PER_PACKET];
 	    acast_t* dst;
 	    uint8_t dst_buffer[BYTES_PER_PACKET*SRC_CHANNELS];
 
-	    src = (acast_t*) src_buffer;
-	    r = recvfrom(sock, src_buffer, sizeof(src_buffer), 0, 
-			 (struct sockaddr *) &addr, &addrlen);
-	    if (r < 0) {
-		perror("recvfrom");
-		exit(1);
+	    if (fds[0].revents & POLLIN) { // got multicast packet
+		src = (acast_t*) src_buffer;
+		r = recvfrom(sock, src_buffer, sizeof(src_buffer), 0, 
+			     (struct sockaddr *) &addr, &addrlen);
+		if (verbose) {
+//		    fprintf(stderr, "data packet from multicast %s:%d\n",
+//			    inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+		}
+		if (r < 0) {
+		    perror("recvfrom");
+		    exit(1);
+		}
+		if (r == 0)
+		    continue;
 	    }
-	    if (r == 0)
-		continue;
+	    else if (fds[1].revents & POLLIN) { // got unicast packet
+		src = (acast_t*) src_buffer;
+		r = recvfrom(ctrl, src_buffer, sizeof(src_buffer), 0, 
+			     (struct sockaddr *) &addr, &addrlen);
+		if (verbose) {
+//		    fprintf(stderr, "data packet from unicast %s:%d\n",
+//			    inet_ntoa(addr.sin_addr), ntohs(addr.sin_port));
+		}
+		if (r < 0) {
+		    perror("recvfrom");
+		    exit(1);
+		}
+		if (r == 0)
+		    continue;
+	    }
 
 	    if (src->magic != ACAST_MAGIC)
 		continue;
@@ -313,7 +393,6 @@ int main(int argc, char** argv)
 		fprintf(stderr, "crc error packet header corrupt\n");
 		continue;
 	    }
-	    src->crc = crc;  // needed?	    
 
 	    if (debug) {
 		if ((r - sizeof(acast_t)) !=
@@ -414,10 +493,10 @@ int main(int argc, char** argv)
 	    last_seqno = dst->seqno;
 	}
 
-	if (submask != 0) {
+	if ((submask != 0) && (ctrl > -1)) {
 	    tick_t now = time_tick_now();
 	    if ((now - sub_time) >= SUB_REFRESH_TIME) {
-		send_subscribe(sock, &caddr, caddrlen, submask);
+		send_subscribe(ctrl, &caddr, caddrlen, client_id, submask);
 		sub_time = now;
 	    }
 	}
